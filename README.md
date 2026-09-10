@@ -114,17 +114,19 @@ LEARNLIVE_MODELS=.models cargo test --test golden -- --ignored --nocapture
 
 **A real meeting recording works too.** Export it as WAV and write an `.expected.jsonl` by hand (see `fixtures/README.md`). Mono makes everything "remote"; a stereo file with you on the left and the call on the right also tests the role split. You can also run the *live* app against a file: pick a source id of `file:/path/to/call.wav` and it's fed in at real-time pace through the normal mixer.
 
+See **ARCHITECTURE.md** for layers, data flow and step-by-step recipes for adding a language, an engine, a command or a UI panel.
+
 ## Status / roadmap
 
 This is a first end-to-end cut and has **not yet been compiled on a Mac** — expect to iterate on `sherpa-rs` / `ort` API names for the exact crate versions you land on. Things I'd do next, in order:
 
-1. Compile, fix bindings, smoke-test with a YouTube video routed through BlackHole.
-2. Token-level streaming within an utterance (currently a line first appears when the VAD closes a chunk, ~1 s after a pause).
-3. Real morphology: lemmas/case/tense are heuristic today (`grammar.rs`). Swap in a UD parser ONNX export (e.g. Trankit/Stanza) or per-language analysers.
-4. KV-cache in the NLLB decoder for faster long sentences; beam search for quality.
-5. Word alignment (source ↔ translation) so hovering a translated word highlights the original.
-6. Save sessions; export flashcards (Anki) from clicked words.
-7. Per-speaker language memory (skip language ID once a speaker's language is known).
+1. Compile, fix bindings, smoke-test with `just demo some-recording.wav`.
+2. Token-level streaming within an utterance.
+3. Real morphology (see ARCHITECTURE.md → known debt).
+4. KV-cache + beam search in the NLLB decoder.
+5. Word alignment (source ↔ translation) for cross-highlighting on hover.
+6. Flashcard export (Anki) from hovered words — history already has everything needed.
+7. Per-person page: every sentence they've said to you, most-hovered words.
 
 ## License
 

@@ -19,7 +19,7 @@ pub struct Eres2Net {
 
 impl Eres2Net {
     pub fn load(model_dir: &Path) -> Result<Self> {
-        let file = model_dir.join(crate::models::SPEAKER.dir)
+        let file = model_dir.join(crate::models::speaker().dir)
             .join("3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx");
         let cfg = ExtractorConfig { model: file.to_string_lossy().into(), num_threads: Some(2), ..Default::default() };
         Ok(Self { inner: Mutex::new(EmbeddingExtractor::new(cfg)?) })

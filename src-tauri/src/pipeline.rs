@@ -19,12 +19,25 @@ use tauri::{AppHandle, Emitter};
 use crate::audio::{MixFrame, Mixer, MixerCommand, Player};
 use crate::engine::diarize::SpeakerRegistry;
 use crate::engine::vad::{Segmenter, Utterance};
-use crate::engine::Engines;
+use crate::engine::{Engines, Loaded};
 use crate::types::{Levels, Segment, SessionConfig, SourceRole, SpeakerRef};
 
-pub const CONTINUE_GAP_MS: u64 = 1500;
-pub const MAX_SENTENCE_MS: u64 = 20_000;
-pub const IDLE_FINALISE_MS: u64 = 1800;
+/// Tunables for sentence revision. Defaults are what worked for conversational speech;
+/// exposed here so they can become user settings without touching the logic.
+#[derive(Debug, Clone)]
+pub struct SentenceOptions {
+    /// A chunk from the same speaker arriving within this gap continues the open sentence.
+    pub continue_gap_ms: u64,
+    /// Never let one sentence grow past this; finalise and start a new one.
+    pub max_sentence_ms: u64,
+    /// Idle time after which an open (unfinished-looking) sentence is finalised anyway.
+    pub idle_finalise_ms: u64,
+    /// Shortest transcript worth showing (filters Whisper's "." and "Thank you." hallucinations).
+    pub min_chars: usize,
+}
+impl Default for SentenceOptions {
+    fn default() -> Self { Self { continue_gap_ms: 1500, max_sentence_ms: 20_000, idle_finalise_ms: 1800, min_chars: 2 } }
+}
 
 // ---------------------------------------------------------------------------------------------
 // Event sink: Tauri in the app, a Vec in tests.
@@ -122,8 +135,9 @@ pub struct Voice { pub player: Arc<Player>, pub mixer: Sender<MixerCommand> }
 
 /// Turns utterances into revisable sentences. Not thread-safe by design: one per ML thread.
 pub struct Sentencer {
-    engines: Arc<Engines>,
+    engines: Loaded,
     cfg: SessionConfig,
+    opts: SentenceOptions,
     speakers: Arc<Mutex<SpeakerRegistry>>,
     sink: Arc<dyn EventSink>,
     voice: Option<Voice>,
@@ -134,9 +148,11 @@ pub struct Sentencer {
 }
 
 impl Sentencer {
-    pub fn new(engines: Arc<Engines>, cfg: SessionConfig, speakers: Arc<Mutex<SpeakerRegistry>>, sink: Arc<dyn EventSink>, voice: Option<Voice>, clip_dir: Option<PathBuf>) -> Self {
-        Self { engines, cfg, speakers, sink, voice, clip_dir, open: None, now: Box::new(Instant::now) }
+    pub fn new(engines: Loaded, cfg: SessionConfig, speakers: Arc<Mutex<SpeakerRegistry>>, sink: Arc<dyn EventSink>, voice: Option<Voice>, clip_dir: Option<PathBuf>) -> Self {
+        Self { engines, cfg, opts: SentenceOptions::default(), speakers, sink, voice, clip_dir, open: None, now: Box::new(Instant::now) }
     }
+
+    pub fn with_options(mut self, opts: SentenceOptions) -> Self { self.opts = opts; self }
 
     #[cfg(test)]
     fn with_clock(mut self, f: impl Fn() -> Instant + Send + 'static) -> Self { self.now = Box::new(f); self }
@@ -144,7 +160,7 @@ impl Sentencer {
     pub fn push(&mut self, job: Job) -> Result<()> {
         let speaker: SpeakerRef = if job.role == SourceRole::Local {
             self.speakers.lock().local()
-        } else if let Some(emb) = self.engines.speaker.lock().clone() {
+        } else if let Some(emb) = &self.engines.speaker {
             let e = emb.embed(&job.utt.pcm)?;
             self.speakers.lock().identify(&e)
         } else {
@@ -153,9 +169,9 @@ impl Sentencer {
 
         let continues = self.open.as_ref().map(|o| {
             o.speaker.id == speaker.id
-                && job.utt.started_ms.saturating_sub(o.ended_ms) <= CONTINUE_GAP_MS
+                && job.utt.started_ms.saturating_sub(o.ended_ms) <= self.opts.continue_gap_ms
                 && !looks_finished(&o.last_text)
-                && job.utt.ended_ms.saturating_sub(o.started_ms) <= MAX_SENTENCE_MS
+                && job.utt.ended_ms.saturating_sub(o.started_ms) <= self.opts.max_sentence_ms
         }).unwrap_or(false);
 
         if !continues {
@@ -184,7 +200,7 @@ impl Sentencer {
 
     /// Call periodically; finalises an open sentence nobody has added to for a while.
     pub fn tick(&mut self) -> Result<()> {
-        let idle = self.open.as_ref().map(|o| (self.now)().duration_since(o.last_touch) >= Duration::from_millis(IDLE_FINALISE_MS)).unwrap_or(false);
+        let idle = self.open.as_ref().map(|o| (self.now)().duration_since(o.last_touch) >= Duration::from_millis(self.opts.idle_finalise_ms)).unwrap_or(false);
         if idle { self.finalise()?; }
         Ok(())
     }
@@ -205,16 +221,14 @@ impl Sentencer {
     fn build(&self, is_final: bool) -> Result<Option<Segment>> {
         let o = self.open.as_ref().expect("open");
         let cfg = &self.cfg;
-        let asr = self.engines.asr.lock().clone().expect("asr loaded");
-        let (src_lang, text) = asr.transcribe(&o.pcm, &cfg.source_lang)?;
-        if text.trim().len() < 2 { return Ok(None); }
+        let (src_lang, text) = self.engines.asr.transcribe(&o.pcm, &cfg.source_lang)?;
+        if text.trim().chars().count() < self.opts.min_chars { return Ok(None); }
 
         let target_lang = if src_lang == cfg.learning { cfg.native.clone() } else { cfg.learning.clone() };
-        let translator = self.engines.translator.lock().clone().expect("translator loaded");
-        let target_text = translator.translate(&text, &src_lang, &target_lang)?;
+        let target_text = self.engines.translator.translate(&text, &src_lang, &target_lang)?;
 
         let study_text = if target_lang == cfg.learning { &target_text } else { &text };
-        let tokens = self.engines.grammar.lock().clone().map(|g| g.analyze(study_text, &cfg.learning).unwrap_or_default()).unwrap_or_default();
+        let tokens = self.engines.grammar.as_ref().map(|g| g.analyze(study_text, &cfg.learning).unwrap_or_default()).unwrap_or_default();
 
         let clip_path = match (&self.clip_dir, is_final) {
             (Some(d), true) => write_wav(d, &o.id, &o.pcm).ok().map(|p| p.to_string_lossy().to_string()),
@@ -234,7 +248,7 @@ impl Sentencer {
 // Live session
 
 pub fn start(app: AppHandle, engines: Arc<Engines>, db: Arc<crate::db::Db>, meeting_id: i64, cfg: SessionConfig, clip_dir: PathBuf) -> Result<SessionHandle> {
-    engines.warm(&cfg)?;
+    let loaded = engines.load(&cfg)?;
     let mixer = Mixer::start(&cfg.sources)?;
     let player = Arc::new(Player::open()?);
     let running = Arc::new(AtomicBool::new(true));
@@ -280,7 +294,7 @@ pub fn start(app: AppHandle, engines: Arc<Engines>, db: Arc<crate::db::Db>, meet
     {
         let running = running.clone();
         let voice = Voice { player: player.clone(), mixer: mixer.commands.clone() };
-        let mut s = Sentencer::new(engines.clone(), cfg.clone(), speakers.clone(), sink.clone(), Some(voice), Some(clip_dir));
+        let mut s = Sentencer::new(loaded, cfg.clone(), speakers.clone(), sink.clone(), Some(voice), Some(clip_dir));
         let sink = sink.clone();
         thread::Builder::new().name("learnlive-ml".into()).spawn(move || {
             while running.load(Ordering::SeqCst) {
@@ -301,11 +315,11 @@ pub fn start(app: AppHandle, engines: Arc<Engines>, db: Arc<crate::db::Db>, meet
 // the role split gets tested too.
 
 pub fn run_offline(engines: Arc<Engines>, cfg: &SessionConfig, wav_path: &std::path::Path) -> Result<Vec<Segment>> {
-    engines.warm(cfg)?;
+    let loaded = engines.load(cfg)?;
     let wav = crate::audio::read_wav(wav_path)?;
     let sink = Arc::new(CollectSink::default());
     let speakers = Arc::new(Mutex::new(SpeakerRegistry::new(512)));
-    let mut s = Sentencer::new(engines.clone(), cfg.clone(), speakers, sink.clone(), None, None);
+    let mut s = Sentencer::new(loaded, cfg.clone(), speakers, sink.clone(), None, None);
 
     // Split channels, resample each, then walk them in lockstep through the VAD like the mixer would.
     let ch = wav.channels as usize;
@@ -343,8 +357,8 @@ pub fn run_offline(engines: Arc<Engines>, cfg: &SessionConfig, wav_path: &std::p
 
 // ---------------------------------------------------------------------------------------------
 
-pub fn speak(engines: &Engines, cfg: &SessionConfig, player: &Player, mixer: &Sender<MixerCommand>, lang: &str, text: &str) {
-    let Some(voice) = engines.tts.lock().get(lang).cloned() else { return };
+pub fn speak(engines: &Loaded, cfg: &SessionConfig, player: &Player, mixer: &Sender<MixerCommand>, lang: &str, text: &str) {
+    let Some(voice) = engines.tts.get(lang) else { return };
     match voice.synthesize(text) {
         Ok((pcm, rate)) => {
             let _ = mixer.send(MixerCommand::Duck(1.0 - cfg.duck_amount));
@@ -395,13 +409,8 @@ mod tests {
         }
     }
 
-    fn engines() -> Arc<Engines> {
-        let e = Engines::new(std::env::temp_dir());
-        *e.asr.lock() = Some(Arc::new(FakeAsr));
-        *e.translator.lock() = Some(Arc::new(FakeMt));
-        *e.grammar.lock() = Some(Arc::new(NoGrammar));
-        *e.speaker.lock() = Some(Arc::new(FakeEmb));
-        Arc::new(e)
+    fn engines() -> Loaded {
+        Loaded { asr: Arc::new(FakeAsr), translator: Arc::new(FakeMt), grammar: Some(Arc::new(NoGrammar)), speaker: Some(Arc::new(FakeEmb)), tts: Default::default() }
     }
     fn cfg() -> SessionConfig { SessionConfig { speak_translations: false, ..Default::default() } }
     fn utt(words: usize, start: u64, voice: f32) -> Utterance {
@@ -472,7 +481,7 @@ mod tests {
         s.push(Job { utt: utt(2, 0, 1.0), role: SourceRole::Remote }).unwrap();
         s.tick().unwrap();
         assert!(sink.final_only().is_empty(), "not idle yet");
-        offset.store(IDLE_FINALISE_MS + 1, Ordering::SeqCst);
+        offset.store(SentenceOptions::default().idle_finalise_ms + 1, Ordering::SeqCst);
         s.tick().unwrap();
         assert_eq!(sink.final_only().len(), 1);
     }

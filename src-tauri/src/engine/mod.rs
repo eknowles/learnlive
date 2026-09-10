@@ -39,6 +39,16 @@ pub trait Synthesizer: Send + Sync {
     fn synthesize(&self, text: &str) -> Result<(Vec<f32>, u32)>;
 }
 
+/// Everything one session needs, already loaded. Cheap to clone (all Arcs).
+#[derive(Clone)]
+pub struct Loaded {
+    pub asr: Arc<dyn Transcriber>,
+    pub translator: Arc<dyn Translator>,
+    pub grammar: Option<Arc<dyn GrammarAnalyzer>>,
+    pub speaker: Option<Arc<dyn SpeakerEmbedder>>,
+    pub tts: std::collections::HashMap<String, Arc<dyn Synthesizer>>,
+}
+
 /// Lazily-initialised engine bundle shared across sessions.
 pub struct Engines {
     pub model_dir: PathBuf,
@@ -64,7 +74,19 @@ impl Engines {
         }
     }
 
-    /// Load everything a session needs. Cheap if already loaded.
+    /// Load everything a session needs and hand back a snapshot. Cheap if already loaded.
+    pub fn load(&self, cfg: &SessionConfig) -> Result<Loaded> {
+        self.warm(cfg)?;
+        Ok(Loaded {
+            asr: self.asr.lock().clone().ok_or_else(|| anyhow::anyhow!("ASR not loaded"))?,
+            translator: self.translator.lock().clone().ok_or_else(|| anyhow::anyhow!("translator not loaded"))?,
+            grammar: self.grammar.lock().clone(),
+            speaker: if cfg.diarize { self.speaker.lock().clone() } else { None },
+            tts: self.tts.lock().clone(),
+        })
+    }
+
+    /// Ensure models are in memory. Prefer `load()`.
     pub fn warm(&self, cfg: &SessionConfig) -> Result<()> {
         if self.asr.lock().is_none() || *self.loaded_asr.lock() != cfg.asr_model {
             *self.asr.lock() = Some(Arc::new(asr::WhisperOnnx::load(&self.model_dir, &cfg.asr_model)?));

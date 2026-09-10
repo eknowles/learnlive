@@ -42,6 +42,7 @@ test: test-ui test-rust lint
 
 test-ui:
     npx tsc --noEmit
+    npm run lint
     npx vitest run
 
 test-rust:
@@ -53,7 +54,7 @@ lint:
 
 fmt:
     cargo fmt --manifest-path {{manifest}}
-    npx prettier --write "src/**/*.{ts,tsx,css}" 2>/dev/null || true
+    npm run fmt
 
 # Regenerate synthetic fixtures from fixtures/*.script.json (needs `just models`)
 fixtures:

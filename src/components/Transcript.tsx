@@ -6,19 +6,27 @@ import type { Segment, Token } from '../lib/types'
 import Word from './Word'
 import { changedIndices as changed } from '../lib/diff'
 
-interface Props { segments: Segment[]; learning: string; live: boolean; speechActive: boolean }
+interface Props {
+  segments: Segment[]
+  learning: string
+  live: boolean
+  speechActive: boolean
+}
 
 export default function Transcript({ segments, learning, live, speechActive }: Props) {
   const scroller = useRef<HTMLElement | null>(null)
   const end = useRef<HTMLDivElement>(null)
-  const [pinned, setPinned] = useState(true)          // following the live edge?
+  const [pinned, setPinned] = useState(true) // following the live edge?
   const [unseen, setUnseen] = useState(0)
   const [now, setNow] = useState(Date.now())
   const prevTokens = useRef<Map<string, Token[]>>(new Map())
   const flash = useRef<Map<string, Set<number>>>(new Map())
 
   // Tick once a second so "3 min ago" stays honest.
-  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t) }, [])
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
 
   // Diff each revision against the last one we rendered.
   useMemo(() => {
@@ -32,7 +40,9 @@ export default function Transcript({ segments, learning, live, speechActive }: P
   }, [segments])
 
   // Find the scroll container once mounted.
-  useEffect(() => { scroller.current = end.current?.closest('.stage') as HTMLElement | null }, [])
+  useEffect(() => {
+    scroller.current = end.current?.closest('.stage') as HTMLElement | null
+  }, [])
 
   // Only follow the live edge if the reader is already there.
   useEffect(() => {
@@ -53,15 +63,25 @@ export default function Transcript({ segments, learning, live, speechActive }: P
     else setUnseen(n => n + 1)
   }, [lastId])
 
-  const jump = () => { end.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); setPinned(true); setUnseen(0) }
+  const jump = () => {
+    end.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    setPinned(true)
+    setUnseen(0)
+  }
 
   if (segments.length === 0) {
     return (
       <div className="empty">
-        {live
-          ? <p>{speechActive ? 'Listening…' : 'Waiting for someone to speak.'}</p>
-          : <><p>Join your call, then press <b>Start listening</b>.</p>
-              <p className="quiet">Everything runs on this machine. Nothing is uploaded.</p></>}
+        {live ? (
+          <p>{speechActive ? 'Listening…' : 'Waiting for someone to speak.'}</p>
+        ) : (
+          <>
+            <p>
+              Join your call, then press <b>Start listening</b>.
+            </p>
+            <p className="quiet">Everything runs on this machine. Nothing is uploaded.</p>
+          </>
+        )}
       </div>
     )
   }
@@ -76,14 +96,27 @@ export default function Transcript({ segments, learning, live, speechActive }: P
         const hot = flash.current.get(seg.id) ?? new Set<number>()
         return (
           <div key={seg.id}>
-            {pause && <div className="pause" aria-label={pause}>{pause}</div>}
-            <article className={`seg ${seg.role} ${seg.final ? '' : 'draft'}`} style={{ ['--spk' as string]: speakerColor(seg.speaker.id) }}>
+            {pause && (
+              <div className="pause" aria-label={pause}>
+                {pause}
+              </div>
+            )}
+            <article
+              className={`seg ${seg.role} ${seg.final ? '' : 'draft'}`}
+              style={{ ['--spk' as string]: speakerColor(seg.speaker.id) }}
+            >
               <header>
                 <span className="who">{seg.speaker.label}</span>
-                <time dateTime={new Date(seg.arrived_at).toISOString()} title={clock(seg.arrived_at)}>{clock(seg.arrived_at)}</time>
+                <time dateTime={new Date(seg.arrived_at).toISOString()} title={clock(seg.arrived_at)}>
+                  {clock(seg.arrived_at)}
+                </time>
                 <span className="ago">{ago(seg.arrived_at, now)}</span>
                 {!seg.final && <span className="draft-tag">still talking…</span>}
-                {seg.speaker.confidence < 0.6 && seg.role === 'remote' && <span className="unsure" title="Not sure who this was">?</span>}
+                {seg.speaker.confidence < 0.6 && seg.role === 'remote' && (
+                  <span className="unsure" title="Not sure who this was">
+                    ?
+                  </span>
+                )}
               </header>
               <p className="study" lang={learning}>
                 {seg.tokens.length
@@ -103,7 +136,11 @@ export default function Transcript({ segments, learning, live, speechActive }: P
         )
       })}
       <div ref={end} />
-      {!pinned && unseen > 0 && <button className="jump" onClick={jump}>{unseen} new · back to now</button>}
+      {!pinned && unseen > 0 && (
+        <button className="jump" onClick={jump}>
+          {unseen} new · back to now
+        </button>
+      )}
     </div>
   )
 }

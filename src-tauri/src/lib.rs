@@ -11,6 +11,7 @@ pub mod calendar;
 pub mod db;
 pub mod commands;
 pub mod engine;
+pub mod error;
 pub mod eval;
 pub mod models;
 pub mod pipeline;
@@ -46,28 +47,7 @@ pub fn run() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            commands::list_audio_devices,
-            commands::list_languages,
-            commands::model_status,
-            commands::prepare_models,
-            commands::start_session,
-            commands::stop_session,
-            commands::update_mixer,
-            commands::rename_speaker,
-            commands::speak,
-            commands::play_clip,
-            commands::calendar_events_near_now,
-            commands::link_meeting,
-            commands::assign_speaker,
-            commands::list_meetings,
-            commands::get_meeting,
-            commands::search_history,
-            commands::delete_meeting,
-            commands::get_remember_voices,
-            commands::set_remember_voices,
-            commands::forget_voice,
-        ])
+        .invoke_handler(all_commands!())
         .run(tauri::generate_context!())
         .expect("error while running LearnLive");
 }

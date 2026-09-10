@@ -10,7 +10,8 @@ export const changedIndices = (prev: Token[] | undefined, next: Token[]): Set<nu
   const out = new Set<number>()
   next.forEach((t, i) => {
     const n = before.get(t.text) ?? 0
-    if (n === 0) out.add(i); else before.set(t.text, n - 1)
+    if (n === 0) out.add(i)
+    else before.set(t.text, n - 1)
   })
   return out
 }

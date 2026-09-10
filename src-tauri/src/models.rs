@@ -18,7 +18,7 @@ pub struct ModelSpec {
     pub kind: &'static str,
     /// Directory (relative to model_dir) the archive expands to / files are placed in.
     pub dir: &'static str,
-    pub url: &'static str,
+    pub url: String,
     pub approx_mb: u32,
 }
 
@@ -31,43 +31,19 @@ pub fn asr(model: &str) -> ModelSpec {
         "large-v3-turbo" => ("whisper-turbo", "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-turbo.tar.bz2", 1600),
         _ => ("whisper-small", "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.tar.bz2", 600),
     };
-    ModelSpec { id, kind: "asr", dir: id, url, approx_mb: mb }
+    ModelSpec { id, kind: "asr", dir: id, url: url.into(), approx_mb: mb }
 }
 
-pub const VAD: ModelSpec = ModelSpec {
-    id: "silero-vad",
-    kind: "vad",
-    dir: "silero-vad",
-    url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
-    approx_mb: 2,
-};
+pub fn vad() -> ModelSpec { ModelSpec { id: "silero-vad", kind: "vad", dir: "silero-vad", url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx".into(), approx_mb: 2 } }
 
 /// Speaker embedding model (3D-Speaker ERes2Net, language-independent).
-pub const SPEAKER: ModelSpec = ModelSpec {
-    id: "speaker-eres2net",
-    kind: "speaker",
-    dir: "speaker-eres2net",
-    url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
-    approx_mb: 26,
-};
+pub fn speaker() -> ModelSpec { ModelSpec { id: "speaker-eres2net", kind: "speaker", dir: "speaker-eres2net", url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx".into(), approx_mb: 26 } }
 
 /// NLLB-200 distilled 600M exported to ONNX (int8). One model, 200 languages, any direction.
-pub const TRANSLATE: ModelSpec = ModelSpec {
-    id: "nllb-200-600m",
-    kind: "translate",
-    dir: "nllb-200-600m",
-    url: "https://huggingface.co/Xenova/nllb-200-distilled-600M/resolve/main/onnx/", // encoder/decoder pulled by name below
-    approx_mb: 700,
-};
+pub fn translate() -> ModelSpec { ModelSpec { id: "nllb-200-600m", kind: "translate", dir: "nllb-200-600m", url: "https://huggingface.co/Xenova/nllb-200-distilled-600M/resolve/main/onnx/".into(), approx_mb: 700 } }
 
 /// Multilingual UD POS tagger (XLM-R base fine-tuned on UD POS, 28+ languages).
-pub const POS: ModelSpec = ModelSpec {
-    id: "xlmr-udpos",
-    kind: "grammar",
-    dir: "xlmr-udpos",
-    url: "https://huggingface.co/wietsedv/xlm-roberta-base-ft-udpos28-all/resolve/main/",
-    approx_mb: 280,
-};
+pub fn pos() -> ModelSpec { ModelSpec { id: "xlmr-udpos", kind: "grammar", dir: "xlmr-udpos", url: "https://huggingface.co/wietsedv/xlm-roberta-base-ft-udpos28-all/resolve/main/".into(), approx_mb: 280 } }
 
 /// TTS voices per language (Piper VITS, via sherpa-onnx). Add more from the sherpa-onnx tts-models release.
 pub fn tts(lang: &str) -> Option<ModelSpec> {
@@ -87,7 +63,30 @@ pub fn tts(lang: &str) -> Option<ModelSpec> {
         "ar" => ("tts-ar", "vits-piper-ar_JO-kareem-medium.tar.bz2"),
         _ => return None,
     };
-    Some(ModelSpec { id, kind: "tts", dir: id, url: Box::leak(format!("{base}{file}").into_boxed_str()), approx_mb: 70 })
+    Some(ModelSpec { id, kind: "tts", dir: id, url: format!("{base}{file}"), approx_mb: 70 })
+}
+
+impl ModelSpec {
+    /// Concrete URLs to fetch. HF repos need individual files; GitHub releases are one archive.
+    pub fn files(&self) -> Vec<String> {
+        match self.kind {
+            "translate" => ["encoder_model_quantized.onnx", "decoder_model_merged_quantized.onnx"].iter().map(|f| format!("{}{}", self.url, f)).chain(
+                ["tokenizer.json", "config.json"].iter().map(|f| format!("{}{}", self.url.trim_end_matches("onnx/"), f))).collect(),
+            "grammar" => ["onnx/model_quantized.onnx", "tokenizer.json", "config.json"].iter().map(|f| format!("{}{}", self.url, f)).collect(),
+            _ => vec![self.url.clone()],
+        }
+    }
+}
+
+/// Every model a config needs — the single source of truth used by the UI status, the
+/// downloader, and the headless fetcher.
+pub fn required(cfg: &crate::types::SessionConfig) -> Vec<ModelSpec> {
+    let mut v = vec![vad(), asr(&cfg.asr_model), translate(), pos()];
+    if cfg.diarize { v.push(speaker()); }
+    if cfg.speak_translations {
+        for l in [&cfg.learning, &cfg.native] { if let Some(t) = tts(l) { v.push(t); } }
+    }
+    v
 }
 
 pub fn model_dir(app: &AppHandle) -> Result<PathBuf> {
@@ -123,12 +122,7 @@ async fn ensure_with(model_dir: &Path, spec: &ModelSpec, mut progress: impl FnMu
     std::fs::create_dir_all(&target)?;
 
     // HF repos: fetch the individual files we need rather than an archive.
-    let files: Vec<String> = match spec.kind {
-        "translate" => ["encoder_model_quantized.onnx", "decoder_model_merged_quantized.onnx"].iter().map(|f| format!("{}{}", spec.url, f)).chain(
-            ["tokenizer.json", "config.json"].iter().map(|f| format!("{}{}", spec.url.trim_end_matches("onnx/"), f))).collect(),
-        "grammar" => ["onnx/model_quantized.onnx", "tokenizer.json", "config.json"].iter().map(|f| format!("{}{}", spec.url, f)).collect(),
-        _ => vec![spec.url.to_string()],
-    };
+    let files: Vec<String> = spec.files();
 
     let client = reqwest::Client::new();
     for url in files {

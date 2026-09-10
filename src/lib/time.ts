@@ -1,5 +1,4 @@
-export const clock = (ms: number) =>
-  new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+export const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
 /** "just now", "12 s ago", "3 min ago", "1 h 05 ago" — coarse on purpose so it doesn't flicker. */
 export const ago = (ms: number, now: number) => {

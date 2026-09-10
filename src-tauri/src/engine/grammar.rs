@@ -23,7 +23,7 @@ pub struct UdPos {
 
 impl UdPos {
     pub fn load(model_dir: &Path) -> Result<Self> {
-        let dir = model_dir.join(crate::models::POS.dir);
+        let dir = model_dir.join(crate::models::pos().dir);
         let cfg: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("config.json"))?)?;
         let id2label = cfg["id2label"].as_object().ok_or_else(|| anyhow!("config.json missing id2label"))?;
         let mut labels = vec![String::new(); id2label.len()];

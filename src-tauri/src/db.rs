@@ -137,22 +137,22 @@ impl Db {
 
     pub fn list_meetings(&self, limit: i64) -> Result<Vec<MeetingSummary>> {
         let c = self.conn.lock();
-        let mut st = c.prepare("SELECT m.id, m.title, m.started_at, m.ended_at, m.learning, m.native, m.calendar_event_id, \
-                                (SELECT COUNT(*) FROM segments s WHERE s.meeting_id=m.id) \
-                                FROM meetings m ORDER BY started_at DESC LIMIT ?")?;
-        let rows = st.query_map([limit], |r| Ok(MeetingSummary {
-            id: r.get(0)?, title: r.get(1)?, started_at: r.get(2)?, ended_at: r.get(3)?, learning: r.get(4)?, native: r.get(5)?,
-            calendar_event_id: r.get(6)?, participants: vec![], sentence_count: r.get(7)?,
-        }))?.collect::<Result<Vec<_>, _>>()?;
+        let mut st = c.prepare(&format!("{MEETING_SELECT} ORDER BY started_at DESC LIMIT ?"))?;
+        let rows = st.query_map([limit], row_to_meeting)?.collect::<Result<Vec<_>, _>>()?;
         drop(st);
         let mut out = vec![];
         for mut m in rows { m.participants = participants_of(&c, m.id)?; out.push(m); }
         Ok(out)
     }
 
+    pub fn meeting_summary(&self, id: i64) -> Result<Option<MeetingSummary>> {
+        let c = self.conn.lock();
+        let m = c.query_row(&format!("{MEETING_SELECT} WHERE m.id=?"), [id], row_to_meeting).optional()?;
+        match m { Some(mut m) => { m.participants = participants_of(&c, m.id)?; Ok(Some(m)) } None => Ok(None) }
+    }
+
     pub fn meeting(&self, id: i64) -> Result<Option<(MeetingSummary, Vec<Segment>)>> {
-        let list = self.list_meetings(i64::MAX)?;
-        let Some(m) = list.into_iter().find(|m| m.id == id) else { return Ok(None) };
+        let Some(m) = self.meeting_summary(id)? else { return Ok(None) };
         let c = self.conn.lock();
         let mut st = c.prepare("SELECT * FROM segments WHERE meeting_id=? ORDER BY started_ms")?;
         let segs = st.query_map([id], row_to_segment)?.collect::<Result<Vec<_>, _>>()?;
@@ -226,6 +226,16 @@ impl Db {
         c.execute("DELETE FROM meetings WHERE id=?", [id])?;
         Ok(clips)
     }
+}
+
+const MEETING_SELECT: &str = "SELECT m.id, m.title, m.started_at, m.ended_at, m.learning, m.native, m.calendar_event_id, \
+    (SELECT COUNT(*) FROM segments s WHERE s.meeting_id=m.id) FROM meetings m";
+
+fn row_to_meeting(r: &rusqlite::Row) -> rusqlite::Result<MeetingSummary> {
+    Ok(MeetingSummary {
+        id: r.get(0)?, title: r.get(1)?, started_at: r.get(2)?, ended_at: r.get(3)?, learning: r.get(4)?, native: r.get(5)?,
+        calendar_event_id: r.get(6)?, participants: vec![], sentence_count: r.get(7)?,
+    })
 }
 
 fn upsert_participant(tx: &rusqlite::Transaction, name: &str, email: Option<&str>) -> Result<i64> {

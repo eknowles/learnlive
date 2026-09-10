@@ -1,6 +1,18 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import type { AudioDevice, CalendarEvent, Language, Levels, MeetingSummary, MixerSource, ModelProgress, ModelStatus, SearchHit, Segment, SessionConfig } from './types'
+import type {
+  AudioDevice,
+  CalendarEvent,
+  Language,
+  Levels,
+  MeetingSummary,
+  MixerSource,
+  ModelProgress,
+  ModelStatus,
+  SearchHit,
+  Segment,
+  SessionConfig,
+} from './types'
 
 export const api = {
   devices: () => invoke<AudioDevice[]>('list_audio_devices'),
@@ -16,7 +28,8 @@ export const api = {
 
   calendarNearNow: () => invoke<CalendarEvent[]>('calendar_events_near_now'),
   linkMeeting: (meetingId: number, event: CalendarEvent) => invoke<MeetingSummary>('link_meeting', { meetingId, event }),
-  assignSpeaker: (meetingId: number, speakerId: number, name: string, email: string | null) => invoke<MeetingSummary>('assign_speaker', { meetingId, speakerId, name, email }),
+  assignSpeaker: (meetingId: number, speakerId: number, name: string, email: string | null) =>
+    invoke<MeetingSummary>('assign_speaker', { meetingId, speakerId, name, email }),
   listMeetings: (limit?: number) => invoke<MeetingSummary[]>('list_meetings', { limit }),
   getMeeting: (id: number) => invoke<[MeetingSummary, Segment[]] | null>('get_meeting', { id }),
   search: (query: string, limit?: number) => invoke<SearchHit[]>('search_history', { query, limit }),

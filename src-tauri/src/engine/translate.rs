@@ -21,7 +21,7 @@ pub struct Nllb {
 
 impl Nllb {
     pub fn load(model_dir: &Path) -> Result<Self> {
-        let dir = model_dir.join(crate::models::TRANSLATE.dir);
+        let dir = model_dir.join(crate::models::translate().dir);
         let build = |f: &str| -> Result<Session> {
             Ok(Session::builder()?
                 .with_optimization_level(GraphOptimizationLevel::Level3)?
