@@ -3,7 +3,7 @@
 
 use std::path::Path;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use crossbeam_channel::Sender;
@@ -88,7 +88,8 @@ pub fn write_wav16(path: &Path, rate: u32, channels: u16, interleaved: &[f32]) -
 pub fn feed(device_id: String, wav: Wav, tx: Sender<RawChunk>, realtime: bool) -> Result<()> {
     let frames_per_chunk = (wav.sample_rate / 50) as usize; // 20 ms
     let step = frames_per_chunk * wav.channels as usize;
-    for chunk in wav.samples.chunks(step) {
+    let start = Instant::now();
+    for (i, chunk) in wav.samples.chunks(step).enumerate() {
         tx.send(RawChunk {
             device_id: device_id.clone(),
             sample_rate: wav.sample_rate,
@@ -97,7 +98,12 @@ pub fn feed(device_id: String, wav: Wav, tx: Sender<RawChunk>, realtime: bool) -
         })
         .map_err(|_| anyhow!("mixer went away"))?;
         if realtime {
-            thread::sleep(Duration::from_millis(20));
+            // Sleep until this chunk's absolute deadline, not for a flat 20 ms: the latter costs
+            // 20 ms *plus* the send, so playback drifts further behind real time on every chunk.
+            let due = Duration::from_millis((i as u64 + 1) * 20);
+            if let Some(wait) = due.checked_sub(start.elapsed()) {
+                thread::sleep(wait);
+            }
         }
     }
     Ok(())
