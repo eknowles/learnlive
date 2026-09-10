@@ -1,0 +1,37 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run dev",
+    "devPath": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LearnLive",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 600,
+        "minHeight": 400,
+        "resizable": true,
+        "fullscreen": false,
+        "alwaysOnTop": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "package": {
+    "productName": "LearnLive",
+    "version": "0.1.0"
+  },
+  "tauri": {
+    "cli": {
+      "description": "Live translation app for language learning"
+    },
+    "systemTray": {
+      "iconPath": "icons/icon.png"
+    }
+  }
+}

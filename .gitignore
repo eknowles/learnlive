@@ -1,0 +1,40 @@
+# Python
+backend/__pycache__/
+backend/venv/
+backend/*.pyc
+backend/.pytest_cache/
+backend/dist/
+backend/build/
+
+# Node/npm
+node_modules/
+dist/
+.env
+.env.local
+
+# Tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Tauri build artifacts
+src-tauri/target/
+target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache
+.cache/
+.huggingface/
+
+# Logs
+*.log
