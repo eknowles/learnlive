@@ -10,14 +10,21 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
+        "label": "main",
         "title": "LearnLive",
         "width": 1180,
         "height": 780,
-        "minWidth": 720,
-        "minHeight": 480,
-        "alwaysOnTop": false
+        "minWidth": 840,
+        "minHeight": 540,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "transparent": true,
+        "trafficLightPosition": { "x": 18, "y": 20 },
+        "windowEffects": { "effects": ["sidebar"], "state": "followsWindowActiveState" },
+        "zoomHotkeysEnabled": false
       }
     ],
     "security": {
@@ -40,7 +47,7 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "12.0",
+      "minimumSystemVersion": "13.0",
       "entitlements": "entitlements.plist"
     }
   }

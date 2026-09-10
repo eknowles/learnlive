@@ -38,6 +38,11 @@ export const api = {
   setRememberVoices: (on: boolean) => invoke<void>('set_remember_voices', { on }),
   forgetVoice: (participantId: number) => invoke<void>('forget_voice', { participantId }),
 
+  // app shell
+  setListening: (live: boolean) => invoke<void>('set_listening', { live }),
+  openSettings: () => invoke<void>('open_settings'),
+  openPrivacySettings: (pane: 'Microphone' | 'Calendars') => invoke<void>('open_privacy_settings', { pane }),
+
   onSegment: (cb: (s: Segment) => void): Promise<UnlistenFn> => listen<Segment>('segment', e => cb(e.payload)),
   onLevels: (cb: (l: Levels) => void): Promise<UnlistenFn> => listen<Levels>('levels', e => cb(e.payload)),
   onModelProgress: (cb: (p: ModelProgress) => void): Promise<UnlistenFn> => listen<ModelProgress>('model-progress', e => cb(e.payload)),

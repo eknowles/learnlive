@@ -13,7 +13,7 @@ export const asAppError = (e: unknown): AppError => {
 export const describe = (e: AppError): string => {
   switch (e.kind) {
     case 'permission':
-      return `${e.message} Check System Settings → Privacy & Security.`
+      return `${e.message} Allow LearnLive in System Settings › Privacy & Security.`
     case 'audio':
       return `${e.message} Pick a different device or check that BlackHole is installed.`
     case 'models':
@@ -21,4 +21,10 @@ export const describe = (e: AppError): string => {
     default:
       return e.message
   }
+}
+
+/** Which Privacy pane to deep-link to, if the error is about one. */
+export const privacyPane = (e: AppError): 'Microphone' | 'Calendars' | null => {
+  if (e.kind !== 'permission') return null
+  return /calendar/i.test(e.message) ? 'Calendars' : 'Microphone'
 }

@@ -64,7 +64,22 @@ That's it — translation, POS tagging and language ID already cover it.
 3. Add the typed wrapper in `src/lib/api.ts`. Components call `api.*`, never `invoke`.
 
 ### Add a UI panel
-Components under `src/components/` are presentational: props in, `api.*` calls out. Session state lives in `hooks/useSession.ts`, transcript state in `hooks/useTranscript.ts`. New cross‑cutting state → a new hook, not more `useState` in `App.tsx`.
+Components under `src/components/` are presentational: props in, `api.*` calls out. Session state lives in `hooks/useSession.ts`, transcript state in `hooks/useTranscript.ts`, past meetings and search in `hooks/useHistory.ts`. New cross‑cutting state → a new hook, not more `useState` in `App.tsx`.
+
+The window is laid out like a native Mac app and new UI should land in the matching place:
+
+- **Sidebar** (`components/shell/Sidebar.tsx`): navigation only — the live session and past meetings.
+- **Toolbar** (`components/shell/Toolbar.tsx`): title, primary action, search, inspector toggle. Keep it to one row of capsule buttons.
+- **Content** (`components/views/`): what you read. Scrolls independently; `[data-scroller]` is what `Transcript` follows.
+- **Inspector** (`components/panels/`): everything you *set*. Build panels from `ui/Form`'s `Group`/`Row` so they look like System Settings.
+- **Settings window** (`windows/Settings.tsx`): app‑wide preferences that rarely change. Per‑session choices stay in the inspector.
+
+Rules of the native shell:
+
+- Colours and fonts come from `styles/tokens.css`, which maps AppKit system colours (`-apple-system-*`) to variables. Never hard‑code a hex colour in a component; accent, dark mode and Increase Contrast then follow the system.
+- Controls that WebKit renders natively (`<select>`, checkboxes, `<input type=checkbox switch>`, sliders, `<progress>`, search fields) are left with their default appearance. Style text size, not the control.
+- Anything a Mac would do with a real NSMenu or NSAlert goes through Tauri: menu bar items in `src-tauri/src/native.rs` (forwarded as the `menu` event, handled in `hooks/useMenu.ts`), context menus via `lib/contextMenu.ts`, confirmations via `lib/dialogs.ts`. No `window.confirm`, no styled fake menus.
+- Config that must survive relaunch or reach the Settings window goes through `lib/prefs.ts` (localStorage + a `config-changed` event); per‑window UI state (sidebar width, inspector visibility) uses `useLayout`.
 
 ### Add a persisted field
 1. Extend `types::Segment` / `MeetingSummary` (Rust) and `src/lib/types.ts` (TS) together.

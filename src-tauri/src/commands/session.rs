@@ -94,9 +94,16 @@ pub(crate) fn attendees(e: &CalendarEvent) -> Vec<(String, Option<String>)> {
     e.attendees.iter().map(|a| (a.name.clone(), Some(a.email.clone()).filter(|s| !s.is_empty()))).collect()
 }
 
+/// Stop whatever session is running (used when the app quits).
+pub(crate) fn shutdown(state: &AppState) {
+    if let Some(s) = state.session.lock().take() {
+        finish(state, s);
+    }
+}
+
 /// Stop + close the meeting row + fold session voices into voiceprints (only if enabled, and
 /// only for speakers the user assigned to a named participant). Never stores your own mic.
-fn finish(state: &State<AppState>, s: pipeline::SessionHandle) {
+fn finish(state: &AppState, s: pipeline::SessionHandle) {
     s.stop();
     let _ = state.db.end_meeting(s.meeting_id, chrono::Utc::now().timestamp());
     if !state.db.remember_voices() {

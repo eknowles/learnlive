@@ -1,0 +1,247 @@
+/* Buttons, grouped forms, meters. One rule set per control role. */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 10px;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: var(--radius-control);
+  background: var(--bg-control);
+  color: var(--label);
+  white-space: nowrap;
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    0 0.5px 1px rgba(0, 0, 0, 0.1);
+}
+.btn:active {
+  background: var(--bg-pressed);
+}
+.btn .icon {
+  flex: none;
+}
+.btn.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.2);
+}
+.btn.destructive {
+  color: var(--red);
+}
+.btn.plain {
+  background: none;
+  box-shadow: none;
+  color: var(--label-2);
+  padding: 0 5px;
+}
+.btn.plain:hover {
+  color: var(--label);
+  background: var(--bg-hover);
+}
+.btn.plain[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+/* Toolbar items: capsules, quiet until hovered, tinted when toggled on. */
+.btn.toolbar-item {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--label-2);
+  transition:
+    background 120ms,
+    color 120ms;
+}
+.btn.toolbar-item:hover {
+  background: var(--bg-hover);
+  color: var(--label);
+}
+.btn.toolbar-item:active {
+  background: var(--bg-pressed);
+}
+.btn.toolbar-item[aria-pressed='true'] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.btn.toolbar-item.icon-only {
+  padding: 0;
+  width: 28px;
+}
+.btn.toolbar-item.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  padding: 0 14px 0 11px;
+  font-weight: 600;
+}
+.btn.toolbar-item.primary:hover {
+  background: color-mix(in srgb, var(--accent) 86%, black);
+  color: var(--on-accent);
+}
+.btn.toolbar-item.stop {
+  background: var(--red);
+  color: #fff;
+  padding: 0 14px 0 11px;
+  font-weight: 600;
+}
+.btn.toolbar-item.stop:hover {
+  background: color-mix(in srgb, var(--red) 86%, black);
+  color: #fff;
+}
+html[data-inactive] .btn.toolbar-item.primary,
+html[data-inactive] .btn.toolbar-item.stop {
+  opacity: 0.55;
+}
+
+/* Grouped forms — the System Settings idiom. */
+.group {
+  margin-bottom: 14px;
+}
+.group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--label-2);
+  padding: 0 6px 5px;
+}
+.group-body {
+  background: var(--bg-content);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-group);
+  overflow: hidden;
+}
+.group-footer {
+  font-size: 11px;
+  color: var(--label-2);
+  padding: 5px 6px 0;
+  line-height: 1.35;
+}
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  min-height: 34px;
+}
+.row + .row {
+  border-top: 1px solid var(--separator);
+}
+.row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.row-label {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-caption {
+  font-size: 11px;
+  color: var(--label-2);
+  line-height: 1.35;
+  white-space: normal;
+}
+.row-caption.warn {
+  color: var(--orange);
+}
+.row-control {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 58%;
+}
+.row-control select {
+  max-width: 100%;
+}
+.row.stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 10px;
+}
+.row.stack .row-control {
+  max-width: none;
+  width: 100%;
+}
+.row.stack select {
+  width: 100%;
+}
+
+/* Mixer strips */
+.strip.muted .row-label,
+.strip.muted .meter {
+  opacity: 0.45;
+}
+.strip .row-control {
+  gap: 10px;
+}
+.meter {
+  flex: 1;
+  height: 4px;
+  background: var(--label-4);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.meter span {
+  display: block;
+  height: 100%;
+  background: var(--green);
+  transition: width 60ms linear;
+}
+.meter.hot span {
+  background: var(--orange);
+}
+
+/* Speakers */
+.row.speaker {
+  gap: 8px;
+}
+.swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+.speaker-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.count {
+  font-size: 11px;
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.search {
+  width: 190px;
+  transition: width 160ms var(--ease);
+}
+.search:focus {
+  width: 240px;
+}
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.slider-row output {
+  font-size: 12px;
+  color: var(--label-2);
+  width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

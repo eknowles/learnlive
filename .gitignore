@@ -45,3 +45,7 @@ Thumbs.db
 src-tauri/fixtures/*.wav
 src-tauri/fixtures/*.expected.jsonl
 .models/
+
+# ui-preview renders
+out/
+scripts/ui-preview/render

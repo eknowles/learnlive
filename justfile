@@ -35,6 +35,16 @@ demo wav:
 build:
     npx tauri build
 
+# Render the UI states to out/ui-*.png in a bare WKWebView with the Tauri bridge mocked (needs `npx vite`)
+ui-preview:
+    mkdir -p out
+    swiftc -O scripts/ui-preview/render.swift -o scripts/ui-preview/render
+    scripts/ui-preview/render http://localhost:5173/ out/ui-setup.png 1180 780 light
+    scripts/ui-preview/render http://localhost:5173/ out/ui-live.png 1180 780 light scripts/ui-preview/live.js
+    scripts/ui-preview/render http://localhost:5173/ out/ui-meeting-dark.png 1180 780 dark scripts/ui-preview/meeting.js
+    scripts/ui-preview/render http://localhost:5173/ out/ui-search.png 1180 780 light scripts/ui-preview/search.js
+    scripts/ui-preview/render "http://localhost:5173/index.html#settings" out/ui-settings.png 560 500 light
+
 # ---- test -----------------------------------------------------------------------------------
 
 # Everything that needs no models (what CI runs on every push)

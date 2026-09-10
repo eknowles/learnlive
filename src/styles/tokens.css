@@ -1,0 +1,70 @@
+/* Design tokens. Colours come from AppKit through WebKit's system-colour keywords, so the
+   app follows the user's accent colour, light/dark mode and Increase Contrast for free.
+   Fallbacks first; the @supports block swaps in the live values where WebKit provides them. */
+:root {
+  color-scheme: light dark;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, system-ui, 'Helvetica Neue', sans-serif;
+  --font-reading: ui-serif, 'New York', 'Iowan Old Style', Charter, Georgia, serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --label: CanvasText;
+  --label-2: color-mix(in srgb, CanvasText 55%, transparent);
+  --label-3: color-mix(in srgb, CanvasText 28%, transparent);
+  --label-4: color-mix(in srgb, CanvasText 12%, transparent);
+  --separator: color-mix(in srgb, CanvasText 12%, transparent);
+  --border: color-mix(in srgb, CanvasText 10%, transparent);
+  --accent: AccentColor;
+  --on-accent: AccentColorText;
+  --bg-content: Canvas;
+  --bg-control: Canvas;
+  --bg-field: Field;
+  --bg-window: #ececec;
+  --bg-hover: color-mix(in srgb, CanvasText 6%, transparent);
+  --bg-pressed: color-mix(in srgb, CanvasText 12%, transparent);
+  --bg-selected: color-mix(in srgb, CanvasText 9%, transparent);
+  --placeholder: color-mix(in srgb, CanvasText 35%, transparent);
+  --red: #ff3b30;
+  --orange: #ff9500;
+  --yellow: #ffcc00;
+  --green: #34c759;
+  --blue: #007aff;
+
+  --radius-control: 6px;
+  --radius-group: 10px;
+  --radius-card: 12px;
+  --toolbar-h: 52px;
+  --traffic-w: 78px; /* traffic lights at x=18 + 3 × 12 + 2 × 8 + breathing room */
+  --sidebar-w: 240px;
+  --inspector-w: 280px;
+  --shadow-popover: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 8px 28px rgba(0, 0, 0, 0.18);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@supports (color: -apple-system-label) {
+  :root {
+    --label: -apple-system-label;
+    --label-2: -apple-system-secondary-label;
+    --label-3: -apple-system-tertiary-label;
+    --label-4: -apple-system-quaternary-label;
+    --separator: -apple-system-separator;
+    --border: -apple-system-container-border;
+    --accent: -apple-system-control-accent;
+    --bg-content: -apple-system-text-background;
+    --bg-control: -apple-system-control-background;
+    --bg-field: -apple-system-text-background;
+    --placeholder: -apple-system-placeholder-text;
+    --red: -apple-system-red;
+    --orange: -apple-system-orange;
+    --yellow: -apple-system-yellow;
+    --green: -apple-system-green;
+    --blue: -apple-system-blue;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-window: #2b2b2d;
+    --shadow-popover: 0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 8px 28px rgba(0, 0, 0, 0.5);
+  }
+}

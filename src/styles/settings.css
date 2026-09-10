@@ -1,0 +1,19 @@
+/* Settings window: a plain window-background surface with grouped forms. */
+.settings {
+  height: 100%;
+  overflow-y: auto;
+  background: var(--bg-window);
+  padding: 18px 22px 20px;
+}
+.settings .group {
+  margin-bottom: 16px;
+}
+.settings .row {
+  padding: 8px 12px;
+}
+.settings-foot {
+  font-size: 11px;
+  color: var(--label-2);
+  text-align: center;
+  margin-top: 2px;
+}

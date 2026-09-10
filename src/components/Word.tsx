@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '../lib/api'
+import Button from './ui/Button'
 import { FEATS, POS } from '../lib/pos'
 import type { Token } from '../lib/types'
 
@@ -34,14 +35,15 @@ export default function Word({ token, lang, changed = false }: { token: Token; l
               {isHint && <span className="quiet">guessed from the ending</span>}
             </span>
           )}
-          <button
+          <Button
+            icon="speaker"
             onMouseDown={e => {
               e.preventDefault()
               api.speak(token.text, lang)
             }}
           >
             Hear
-          </button>
+          </Button>
         </span>
       )}
     </span>
