@@ -1,0 +1,94 @@
+//! ML engines. Each is behind a trait so a model can be swapped without touching the pipeline.
+//! Engines are lazily loaded on first session start (after `prepare_models` has fetched files).
+
+pub mod asr;
+pub mod diarize;
+pub mod grammar;
+pub mod languages;
+pub mod translate;
+pub mod tts;
+pub mod vad;
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use anyhow::Result;
+use parking_lot::Mutex;
+
+use crate::types::{SessionConfig, Token};
+
+pub trait Transcriber: Send + Sync {
+    /// Returns (language code, text). `lang_hint` = "auto" or ISO-639-1.
+    fn transcribe(&self, pcm16k: &[f32], lang_hint: &str) -> Result<(String, String)>;
+}
+
+pub trait SpeakerEmbedder: Send + Sync {
+    fn embed(&self, pcm16k: &[f32]) -> Result<Vec<f32>>;
+}
+
+pub trait Translator: Send + Sync {
+    fn translate(&self, text: &str, from: &str, to: &str) -> Result<String>;
+}
+
+pub trait GrammarAnalyzer: Send + Sync {
+    fn analyze(&self, text: &str, lang: &str) -> Result<Vec<Token>>;
+}
+
+pub trait Synthesizer: Send + Sync {
+    /// Returns (mono samples, sample rate).
+    fn synthesize(&self, text: &str) -> Result<(Vec<f32>, u32)>;
+}
+
+/// Lazily-initialised engine bundle shared across sessions.
+pub struct Engines {
+    pub model_dir: PathBuf,
+    pub asr: Mutex<Option<Arc<dyn Transcriber>>>,
+    pub speaker: Mutex<Option<Arc<dyn SpeakerEmbedder>>>,
+    pub translator: Mutex<Option<Arc<dyn Translator>>>,
+    pub grammar: Mutex<Option<Arc<dyn GrammarAnalyzer>>>,
+    /// keyed by language
+    pub tts: Mutex<std::collections::HashMap<String, Arc<dyn Synthesizer>>>,
+    loaded_asr: Mutex<String>,
+}
+
+impl Engines {
+    pub fn new(model_dir: PathBuf) -> Self {
+        Self {
+            model_dir,
+            asr: Mutex::new(None),
+            speaker: Mutex::new(None),
+            translator: Mutex::new(None),
+            grammar: Mutex::new(None),
+            tts: Mutex::new(Default::default()),
+            loaded_asr: Mutex::new(String::new()),
+        }
+    }
+
+    /// Load everything a session needs. Cheap if already loaded.
+    pub fn warm(&self, cfg: &SessionConfig) -> Result<()> {
+        if self.asr.lock().is_none() || *self.loaded_asr.lock() != cfg.asr_model {
+            *self.asr.lock() = Some(Arc::new(asr::WhisperOnnx::load(&self.model_dir, &cfg.asr_model)?));
+            *self.loaded_asr.lock() = cfg.asr_model.clone();
+        }
+        if cfg.diarize && self.speaker.lock().is_none() {
+            *self.speaker.lock() = Some(Arc::new(diarize::Eres2Net::load(&self.model_dir)?));
+        }
+        if self.translator.lock().is_none() {
+            *self.translator.lock() = Some(Arc::new(translate::Nllb::load(&self.model_dir)?));
+        }
+        if self.grammar.lock().is_none() {
+            *self.grammar.lock() = Some(Arc::new(grammar::UdPos::load(&self.model_dir)?));
+        }
+        if cfg.speak_translations {
+            let mut tts = self.tts.lock();
+            for lang in [&cfg.learning, &cfg.native] {
+                if !tts.contains_key(lang) {
+                    if let Some(v) = tts::Piper::load(&self.model_dir, lang)? {
+                        tts.insert(lang.clone(), Arc::new(v));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}

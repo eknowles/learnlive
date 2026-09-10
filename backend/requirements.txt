@@ -1,8 +1,0 @@
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-faster-whisper==0.10.0
-argos-translate==1.12.0
-pymorphy2==0.9.1
-python-sounddevice==0.4.6
-numpy==1.24.3
-pydantic==2.4.2

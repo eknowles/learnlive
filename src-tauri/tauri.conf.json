@@ -1,37 +1,34 @@
 {
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LearnLive",
+  "version": "0.2.0",
+  "identifier": "dev.eknowles.learnlive",
   "build": {
-    "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
-    "devPath": "http://localhost:5173",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
         "title": "LearnLive",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 600,
-        "minHeight": 400,
-        "resizable": true,
-        "fullscreen": false,
+        "width": 1180,
+        "height": 780,
+        "minWidth": 720,
+        "minHeight": 480,
         "alwaysOnTop": false
       }
     ],
-    "security": {
-      "csp": null
-    }
+    "security": { "csp": null }
   },
-  "package": {
-    "productName": "LearnLive",
-    "version": "0.1.0"
-  },
-  "tauri": {
-    "cli": {
-      "description": "Live translation app for language learning"
-    },
-    "systemTray": {
-      "iconPath": "icons/icon.png"
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "app", "msi", "appimage"],
+    "icon": ["icons/icon.png"],
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "entitlements": "entitlements.plist"
     }
   }
 }

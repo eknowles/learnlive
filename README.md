@@ -1,308 +1,89 @@
 # LearnLive
 
-Live translation and grammar analysis app for practicing Russian in Google Meet sessions.
+Live translation, speaker detection and grammar coaching for video calls — one binary, fully offline.
 
-**Live English → Russian translation with interactive word analysis, pronunciation, and grammar highlighting.**
+Join a Google Meet / Zoom / Teams call, press **Start listening**, and every utterance shows up as:
 
-## Features
+- who said it (speakers are told apart by voice; your own mic is always "You")
+- the sentence in the language you're learning, in large serif type, with each word underlined by part of speech
+- the gloss in your native language underneath
+- hover any word for lemma, part of speech and case/tense; **Hear** / **Slower** / **Replay original** per line
+- optionally, the translation read aloud while the call audio is ducked underneath it
 
-- 🎤 **Real-time transcription** - Captures audio from Google Meet
-- 🌐 **Instant translation** - English to Russian with Argos Translate
-- 📖 **Grammar analysis** - Part of speech tagging and morphological analysis
-- 🎨 **Interactive UI** - Hover over Russian words to see:
-  - English equivalent
-  - Dictionary form (lemma)
-  - Part of speech (noun, verb, adjective, etc.)
-  - Grammatical information (case, tense, etc.)
-- 🔊 **Pronunciation** - Click words to hear them spoken
-- 🎯 **Color-coded grammar** - Visual highlighting of different word types
+Works in either direction: speech in your learning language is translated *to* your native language so you can follow; anything else (including what you say) is translated *into* the learning language so you see how you could have said it.
 
-## Tech Stack
+## Languages
 
-### Frontend
-- **Tauri** - Lightweight desktop app framework
-- **React 18** - UI components
-- **TypeScript** - Type safety
-- **Vite** - Fast dev server
+English, Russian, Ukrainian, Spanish, French, German, Italian, Portuguese, Polish, Turkish, Arabic, Chinese, Japanese, Korean, Hindi, Dutch. Any pair, any direction. Adding one is a row in `src-tauri/src/engine/languages.rs` (+ a Piper voice in `models.rs` if you want it spoken).
 
-### Backend
-- **FastAPI** - Python web framework
-- **Faster-Whisper** - Fast speech-to-text (OpenAI Whisper)
-- **Argos Translate** - Offline translation
-- **pymorphy2** - Russian morphological analysis
-- **python-sounddevice** - Audio capture
+## How it's built
 
-## Setup
+Everything is Rust inside a Tauri 2 app. No Python, no separate server.
 
-### Prerequisites
-
-- **Node.js** 18+ (for Tauri/React)
-- **Rust** (for Tauri) - Install from [rustup.rs](https://rustup.rs/)
-- **Python** 3.10+ (for backend)
-- **BlackHole** - Virtual audio device for capturing system audio
-  - Download: https://existential.audio/blackhole/
-  - Install and restart after installation
-
-### Backend Setup
-
-1. Create Python environment:
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+cpal (BlackHole, mic, …)
+  └─ audio::mixer      per-source gain / mute / duck, resample → 16 kHz mono, 20 ms frames
+       └─ engine::vad        Silero VAD → utterances                       (sherpa-onnx)
+            ├─ engine::asr        Whisper, multilingual + language ID       (sherpa-onnx)
+            ├─ engine::diarize    ERes2Net speaker embeddings + online clustering (sherpa-onnx)
+            ├─ engine::translate  NLLB-200 distilled 600M, int8             (ort / ONNX Runtime)
+            ├─ engine::grammar    XLM-R Universal Dependencies POS tagger   (ort)
+            └─ engine::tts        Piper voices, ducked over the call         (sherpa-onnx)
+                 └─ Tauri events → React transcript
 ```
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+The binary is ~15 MB. Models (~1.2 GB for a typical setup, more for the large Whisper) are downloaded into the app data dir on first run for the languages you pick, with a progress list in the UI. Turn on the `bundled-models` cargo feature if you'd rather ship them inside the app.
 
-3. Find your BlackHole device index:
-```bash
-python -c "import sounddevice as sd; import pprint; pprint.pprint(sd.query_devices())"
-```
+## Build
 
-Look for something like "BlackHole 2ch" and note its index number.
+Prereqs: Rust stable, Node 18+, and on macOS Xcode command line tools. `cargo install tauri-cli --version "^2"`.
 
-4. Update `backend/main.py` with your device index:
-```python
-BLACKHOLE_DEVICE_INDEX = 12  # Change this to your BlackHole index
-```
-
-5. Test the backend:
-```bash
-python main.py
-```
-
-Should see:
-```
-INFO:     Application startup complete
-WebSocket endpoint: ws://127.0.0.1:8000/ws/transcribe
-```
-
-### Frontend Setup
-
-1. Install Node dependencies:
 ```bash
 npm install
+npm run tauri dev      # dev with hot reload
+npm run tauri build    # → src-tauri/target/release/bundle/{macos,dmg}/LearnLive.app
 ```
 
-2. Install Tauri CLI:
-```bash
-cargo install tauri-cli
-```
+First `cargo build` pulls prebuilt sherpa-onnx and ONNX Runtime binaries (the `download-binaries` features), so it needs network once.
 
-3. Development server (in new terminal):
-```bash
-npm run tauri:dev
-```
+### Getting call audio in (macOS)
 
-This launches both the Vite dev server (port 5173) and the Tauri app.
+1. Install [BlackHole 2ch](https://existential.audio/blackhole/).
+2. Audio MIDI Setup → create a **Multi-Output Device** containing your headphones *and* BlackHole, set it as system output. You keep hearing the call; LearnLive captures the BlackHole leg.
+3. In LearnLive, *Call audio* → BlackHole 2ch, *Your microphone* → your mic.
 
-4. Build for production:
-```bash
-npm run tauri:build
-```
+Windows: WASAPI loopback devices show up automatically. Linux: PulseAudio/PipeWire "Monitor of …" sources.
 
-Creates `.dmg` in `src-tauri/target/release/bundle/macos/`
-
-## Usage
-
-### Step 1: Configure Google Meet Audio
-
-1. Open Google Meet in Chrome
-2. Go to Settings → Audio
-3. Set **Speaker output** to "BlackHole 2ch"
-4. Keep Meet window open
-
-### Step 2: Start the Backend
-
-```bash
-cd backend
-source venv/bin/activate
-python main.py
-```
-
-Leave this running in the background.
-
-### Step 3: Launch LearnLive App
-
-```bash
-npm run tauri:dev
-```
-
-Or use the built `.dmg` if running production build.
-
-### Step 4: Start Listening
-
-1. Click **"Start Listening"** in the app
-2. Speak in Google Meet (or have the speaker talk)
-3. Watch translations appear with grammar analysis
-
-## How It Works
+## Project layout
 
 ```
-Google Meet Audio
-    ↓
-BlackHole (virtual audio device)
-    ↓
-Python Backend
-├─ Whisper (transcribe English audio)
-├─ Argos Translate (translate EN → RU)
-├─ pymorphy2 (analyze Russian grammar)
-└─ WebSocket (send to frontend)
-    ↓
-Tauri App (React frontend)
-├─ Display sentences
-├─ Highlight words by POS
-└─ Show grammar on hover
+src/                       React UI (TypeScript)
+  components/Setup.tsx       languages, devices, model download, start/stop
+  components/Mixer.tsx       live per-source gain, mute, meters
+  components/Speakers.tsx    detected speakers, rename
+  components/Transcript.tsx  the reading surface
+  components/Word.tsx        hover card + pronunciation
+  lib/api.ts                 typed wrapper over Tauri commands/events
+src-tauri/src/
+  audio/                     capture, mixer, resample, playback
+  engine/                    asr, diarize, translate, grammar, tts, vad, languages
+  pipeline.rs                session orchestration (audio thread + ML thread)
+  models.rs                  manifest + downloader
+  commands.rs                Tauri command surface
 ```
 
-## Interactive Features
+## Status / roadmap
 
-### Hover on Russian Word
-Shows a popup with:
-- **Lemma** - Dictionary form of the word
-- **POS** - Part of speech (NOUN, VERB, etc.)
-- **English** - Translation of that word
-- **Grammar** - Case, tense, aspect, etc.
+This is a first end-to-end cut and has **not yet been compiled on a Mac** — expect to iterate on `sherpa-rs` / `ort` API names for the exact crate versions you land on. Things I'd do next, in order:
 
-### Click Word
-Plays pronunciation (coming in next version)
-
-### Color Legend
-- 🔵 Blue - Nouns
-- 🔴 Red - Verbs
-- 🟢 Green - Adjectives
-- 🟡 Yellow - Adverbs
-- 🟣 Purple - Prepositions
-
-## Project Structure
-
-```
-learnlive/
-├── src/                      # React frontend
-│   ├── components/
-│   │   ├── TranslationDisplay.tsx
-│   │   ├── ControlPanel.tsx
-│   │   └── *.css
-│   ├── App.tsx
-│   ├── main.tsx
-│   └── index.css
-├── src-tauri/                # Tauri/Rust
-│   ├── src/
-│   │   └── main.rs
-│   ├── Cargo.toml
-│   └── tauri.conf.json
-├── backend/                  # Python FastAPI
-│   ├── main.py
-│   └── requirements.txt
-├── index.html
-├── package.json
-├── vite.config.ts
-└── README.md
-```
-
-## Development
-
-### Frontend Development
-
-Hot reload is enabled. Changes to React files auto-refresh:
-
-```bash
-npm run tauri:dev
-```
-
-### Backend Development
-
-Restart the Python process to reload:
-
-```bash
-# Terminal 1
-cd backend
-python main.py
-
-# Terminal 2 (in another tab)
-npm run tauri:dev
-```
-
-### Adding Features
-
-**Add a new React component:**
-1. Create `src/components/MyComponent.tsx`
-2. Import and use in `src/App.tsx`
-
-**Add a new Python endpoint:**
-1. Add route to `backend/main.py`
-2. Call via fetch in React component
-
-**Add a new ML model:**
-1. Add import to `backend/main.py`
-2. Initialize in startup
-3. Use in `process_audio_buffer()` function
-
-## Troubleshooting
-
-### "BlackHole device not found"
-- Make sure BlackHole is installed and Mac was restarted
-- Run `python -c "import sounddevice as sd; print(sd.query_devices())"` to list devices
-- Update `BLACKHOLE_DEVICE_INDEX` in `backend/main.py`
-
-### "Failed to connect to backend"
-- Make sure `python main.py` is running in the backend directory
-- Check that you're running on port 8000
-- Look for error messages in the terminal
-
-### "Whisper models downloading forever"
-- Whisper downloads ~140MB on first run
-- Make sure you have internet connection
-- Models cache in `~/.cache/huggingface/`
-
-### "Argos Translate package install fails"
-- Try: `argostranslate-package-en-ru` (may need manual package install)
-- Or use HuggingFace models as fallback
-
-### App crashes on startup
-- Check browser console for errors (F12 in dev mode)
-- Check Python backend logs
-- Try: `npm install` and `cargo update`
-
-## Next Steps
-
-### Planned Features
-
-- [ ] Audio playback of translations
-- [ ] Slow-motion playback (0.8x speed)
-- [ ] Flashcard generation from translations
-- [ ] Grammar statistics dashboard
-- [ ] User dictionary (save custom translations)
-- [ ] Settings panel (language pair selection)
-- [ ] Dark mode
-- [ ] Support for other language pairs
-
-### Known Limitations
-
-- **Latency**: 2-5 seconds between speech and translation (normal for Whisper)
-- **Accuracy**: Depends on audio quality and speaker clarity
-- **Languages**: Currently English ↔ Russian only
-- **Requires separate Python process** - Not bundled into single executable (yet)
-
-## Contributing
-
-Found a bug or have a feature request? Open an issue!
+1. Compile, fix bindings, smoke-test with a YouTube video routed through BlackHole.
+2. Streaming partials (`Partial` type exists, not wired) so text appears while someone is still talking.
+3. Real morphology: lemmas/case/tense are heuristic today (`grammar.rs`). Swap in a UD parser ONNX export (e.g. Trankit/Stanza) or per-language analysers.
+4. KV-cache in the NLLB decoder for faster long sentences; beam search for quality.
+5. Word alignment (source ↔ translation) so hovering a translated word highlights the original.
+6. Save sessions; export flashcards (Anki) from clicked words.
+7. Per-speaker language memory (skip language ID once a speaker's language is known).
 
 ## License
 
 MIT
-
-## Resources
-
-- [Tauri Docs](https://tauri.app/)
-- [Whisper GitHub](https://github.com/openai/whisper)
-- [Argos Translate](https://www.argosopentech.com/)
-- [pymorphy2 Docs](https://pymorphy2.readthedocs.io/)
-- [FastAPI](https://fastapi.tiangolo.com/)
-
----
-
-Made for Russian learners. Happy learning! 🚀

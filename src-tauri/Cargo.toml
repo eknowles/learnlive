@@ -1,18 +1,59 @@
 [package]
 name = "learnlive"
-version = "0.1.0"
-description = "Live translation app for language learning"
+version = "0.2.0"
+description = "Live translation, speaker detection and grammar coaching for video calls"
 authors = ["Ed Knowles"]
 edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "learnlive_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "1.5", features = [] }
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "1.5", features = ["shell-open"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "1"
+log = "0.4"
+env_logger = "0.11"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "fs"] }
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+
+# Audio: capture from any CoreAudio/WASAPI/ALSA device (BlackHole, mic, aggregate devices)
+cpal = "0.15"
+rubato = "0.15"          # high-quality resampling to 16 kHz mono
+ringbuf = "0.4"
+
+# Speech stack: VAD, ASR (Whisper / SenseVoice), speaker embeddings, TTS — all ONNX, all offline.
+# sherpa-rs wraps sherpa-onnx; "download-binaries" pulls prebuilt libsherpa-onnx at build time.
+sherpa-rs = { version = "0.6", features = ["download-binaries"] }
+
+# Machine translation (NLLB-200) and POS tagging via ONNX Runtime
+ort = { version = "2.0.0-rc.9", features = ["download-binaries"] }
+tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
+ndarray = "0.16"
+
+# Model download / cache
+reqwest = { version = "0.12", features = ["stream", "rustls-tls"], default-features = false }
+futures-util = "0.3"
+sha2 = "0.10"
+dirs = "5"
+uuid = { version = "1", features = ["v4"] }
 
 [features]
-default = ["custom-protocol"]
-custom-protocol = ["tauri/custom-protocol"]
+default = []
+# Embed model files into the binary (large!). Off by default; models are fetched to the app data dir on first run.
+bundled-models = []
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
