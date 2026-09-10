@@ -91,3 +91,18 @@ h2 { font-size: 12px; font-weight: 600; color: var(--quiet); margin: 18px 0 8px;
   .study, .gloss, .seg footer { grid-column: 1; }
 }
 @media (prefers-reduced-motion: reduce) { .meter span { transition: none; } }
+
+/* revisions & time */
+.seg.draft .study { color: color-mix(in srgb, var(--ink) 70%, var(--paper)); }
+.seg.draft .gloss { font-style: italic; }
+.draft-tag { color: var(--quiet); font-size: 12px; font-style: italic; }
+.ago { color: var(--quiet); font-size: 12px; }
+.w.changed { animation: settle 1.6s ease-out; }
+@keyframes settle {
+  0%   { background: color-mix(in srgb, var(--pos) 45%, transparent); }
+  100% { background: transparent; }
+}
+.pause { text-align: center; color: var(--quiet); font-size: 12px; padding: 10px 0 2px; }
+.pause::before, .pause::after { content: ''; display: inline-block; width: 40px; border-top: 1px dashed var(--rule); vertical-align: middle; margin: 0 10px; }
+.jump { position: sticky; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); border-color: transparent; padding: 8px 14px; border-radius: 999px; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+@media (prefers-reduced-motion: reduce) { .w.changed { animation: none; background: color-mix(in srgb, var(--pos) 25%, transparent); } }

@@ -40,7 +40,7 @@ export default function App() {
     }).catch(e => setError(String(e)))
     api.languages().then(setLanguages)
     Promise.all([
-      api.onSegment(s => setSegments(prev => [...prev, s])),
+      api.onSegment(s => setSegments(prev => prev.some(p => p.id === s.id) ? prev.map(p => p.id === s.id ? s : p) : [...prev, s])),
       api.onLevels(setLevels),
       api.onModelProgress(p => setProgress(prev => ({ ...prev, [p.model]: p }))),
       api.onError(setError),

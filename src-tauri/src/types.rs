@@ -93,6 +93,14 @@ pub struct Segment {
     pub tokens: Vec<Token>,
     /// Path to the original audio clip (wav) so the UI can replay what was actually said.
     pub clip_path: Option<String>,
+    /// False while the sentence may still grow. The UI shows provisional lines muted and
+    /// replaces them in place (same `id`) as revisions arrive.
+    #[serde(rename = "final")]
+    pub is_final: bool,
+    /// 0 for the first draft, +1 per re-transcription/re-translation of the merged audio.
+    pub revision: u32,
+    /// Wall-clock arrival, Unix ms — so the UI can say "14:02:17 · 3 min ago".
+    pub arrived_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]

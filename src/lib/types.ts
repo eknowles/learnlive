@@ -57,6 +57,9 @@ export interface Segment {
   target_text: string
   tokens: Token[]
   clip_path: string | null
+  final: boolean
+  revision: number
+  arrived_at: number
 }
 
 export interface ModelStatus { id: string; kind: string; present: boolean; approx_mb: number }

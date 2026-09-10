@@ -9,6 +9,8 @@ Join a Google Meet / Zoom / Teams call, press **Start listening**, and every utt
 - the gloss in your native language underneath
 - hover any word for lemma, part of speech and case/tense; **Hear** / **Slower** / **Replay original** per line
 - optionally, the translation read aloud while the call audio is ducked underneath it
+- lines are provisional while someone is still talking, then rewritten in place once the sentence lands — words that moved or changed form flash briefly, so free-word-order languages like Russian don't leave you with a wrong first draft
+- each line shows arrival time and a live "3 min ago"; scrolling up pauses auto-follow, with a "N new · back to now" button to return
 
 Works in either direction: speech in your learning language is translated *to* your native language so you can follow; anything else (including what you say) is translated *into* the learning language so you see how you could have said it.
 
@@ -46,6 +48,10 @@ npm run tauri build    # → src-tauri/target/release/bundle/{macos,dmg}/LearnLi
 
 First `cargo build` pulls prebuilt sherpa-onnx and ONNX Runtime binaries (the `download-binaries` features), so it needs network once.
 
+### How revision works
+
+`pipeline.rs` keeps one *open* sentence per session. A new VAD chunk **continues** it when it's the same speaker, arrived within 1.5 s, the previous transcript didn't end in terminal punctuation, and the total is under 20 s. Continuation re-runs Whisper on the *merged audio* (not string-concat) and re-translates, emitting the same `id` with `final: false` and `revision + 1`. The sentence finalises on terminal punctuation, a speaker change, 1.8 s of idle, or the length cap; only then does TTS speak it and the clip get written. The UI upserts by id and diffs tokens against the previous revision.
+
 ### Getting call audio in (macOS)
 
 1. Install [BlackHole 2ch](https://existential.audio/blackhole/).
@@ -77,7 +83,7 @@ src-tauri/src/
 This is a first end-to-end cut and has **not yet been compiled on a Mac** — expect to iterate on `sherpa-rs` / `ort` API names for the exact crate versions you land on. Things I'd do next, in order:
 
 1. Compile, fix bindings, smoke-test with a YouTube video routed through BlackHole.
-2. Streaming partials (`Partial` type exists, not wired) so text appears while someone is still talking.
+2. Token-level streaming within an utterance (currently a line first appears when the VAD closes a chunk, ~1 s after a pause).
 3. Real morphology: lemmas/case/tense are heuristic today (`grammar.rs`). Swap in a UD parser ONNX export (e.g. Trankit/Stanza) or per-language analysers.
 4. KV-cache in the NLLB decoder for faster long sentences; beam search for quality.
 5. Word alignment (source ↔ translation) so hovering a translated word highlights the original.
