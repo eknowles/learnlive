@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.0/.schema/devbox.schema.json",
+  "packages": [
+    "rustup@1.27",
+    "nodejs@20",
+    "just@1.36",
+    "pkg-config@latest",
+    "cmake@latest",
+    "ffmpeg@latest",
+    "libiconv@latest"
+  ],
+  "env": {
+    "RUSTUP_HOME": "$HOME/.rustup",
+    "CARGO_HOME": "$HOME/.cargo",
+    "LEARNLIVE_MODELS": "$PWD/.models"
+  },
+  "shell": {
+    "init_hook": [
+      "export PATH=\"$CARGO_HOME/bin:$PATH\"",
+      "rustup show active-toolchain >/dev/null 2>&1 || rustup toolchain install stable --profile minimal",
+      "command -v cargo-tauri >/dev/null || echo 'run: just setup'"
+    ],
+    "scripts": {
+      "test": "just test",
+      "dev":  "just dev"
+    }
+  }
+}

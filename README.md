@@ -47,13 +47,14 @@ The binary is ~15 MB. Models (~1.2 GB for a typical setup, more for the large Wh
 
 ## Build
 
-Prereqs: Rust stable, Node 18+, and on macOS Xcode command line tools. `cargo install tauri-cli --version "^2"`.
-
 ```bash
-npm install
-npm run tauri dev      # dev with hot reload
-npm run tauri build    # → src-tauri/target/release/bundle/{macos,dmg}/LearnLive.app
+devbox shell   # Rust, Node, just, ffmpeg from devbox.json
+just setup     # npm ci + tauri CLI
+just dev       # hot reload
+just build     # → src-tauri/target/release/bundle/{macos,dmg}/
 ```
+
+Without devbox: Rust stable, Node 20, `cargo install tauri-cli --version "^2"`, then the `npm run tauri …` scripts. See CONTRIBUTING.md for the release flow (conventional commits → release-please).
 
 First `cargo build` pulls prebuilt sherpa-onnx and ONNX Runtime binaries (the `download-binaries` features), so it needs network once.
 
