@@ -32,7 +32,8 @@ pub struct SentenceOptions {
     pub max_sentence_ms: u64,
     /// Idle time after which an open (unfinished-looking) sentence is finalised anyway.
     pub idle_finalise_ms: u64,
-    /// Shortest transcript worth showing (filters Whisper's "." and "Thank you." hallucinations).
+    /// Shortest transcript worth showing, measured after `strip_non_speech` (filters the bare
+    /// "." Whisper returns for near-silent audio).
     pub min_chars: usize,
 }
 impl Default for SentenceOptions {
@@ -173,8 +174,10 @@ struct Open {
     revision: u32,
     arrived_at: u64,
     last_touch: Instant,
-    /// (samples of `pcm` this was computed from, result)
-    cached: Option<(usize, Built)>,
+    /// (samples of `pcm` this was computed from, result). `None` for the result means there
+    /// was nothing worth showing — cached like any other verdict, so a cough is not
+    /// transcribed a second time on its way out.
+    cached: Option<(usize, Option<Built>)>,
 }
 
 fn now_ms() -> u64 {
@@ -184,6 +187,43 @@ fn now_ms() -> u64 {
 pub fn looks_finished(text: &str) -> bool {
     let t = text.trim_end();
     t.ends_with(['.', '!', '?', '。', '！', '？']) && !t.ends_with("...") && !t.ends_with('…')
+}
+
+/// Strip Whisper's non-speech annotations, leaving whatever was actually said.
+///
+/// Whisper narrates sound it cannot transcribe as a bracketed aside — "(coughing)", "[static]",
+/// "*sighs*", "♪♪♪" — written in whichever language it thinks it is hearing, so a Russian call
+/// produces "(Кашель)" and "(статика)". We match on the wrapper rather than on keywords: a
+/// keyword list would only ever cover the languages we happened to test, and Whisper has 99.
+///
+/// An opening bracket with no closer is left alone, on the grounds that it is punctuation in a
+/// real sentence rather than an annotation that lost its other half. A stray "♪" or "*" is not
+/// punctuation in any sentence, so that one goes.
+pub fn strip_non_speech(text: &str) -> String {
+    // Wrappers Whisper uses, including the full-width CJK forms.
+    const PAIRS: [(char, char); 6] = [('(', ')'), ('[', ']'), ('{', '}'), ('（', '）'), ('［', '］'), ('【', '】')];
+    // Wrappers that are their own closer.
+    const SYMMETRIC: [char; 2] = ['♪', '*'];
+
+    let chars: Vec<char> = text.chars().collect();
+    let mut kept = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let symmetric = SYMMETRIC.contains(&c);
+        let closer = PAIRS.iter().find(|(open, _)| *open == c).map(|(_, close)| *close).or(symmetric.then_some(c));
+        match closer.and_then(|close| chars[i + 1..].iter().position(|&x| x == close)) {
+            Some(offset) => i += offset + 2,
+            None => {
+                if !symmetric {
+                    kept.push(c);
+                }
+                i += 1;
+            }
+        }
+    }
+    // Cutting an aside out of the middle of a sentence leaves a double space behind.
+    kept.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Optional audio output for spoken translations (absent in offline runs).
@@ -355,15 +395,19 @@ impl Sentencer {
         let pcm_len = self.open.as_ref().expect("open").pcm.len();
 
         // Reuse the draft's work when finalising a sentence that hasn't grown. Without this,
-        // every sentence ending in punctuation is transcribed and translated twice.
+        // every sentence ending in punctuation is transcribed and translated twice. "Nothing
+        // worth showing" is cached the same way, so a cough is not transcribed again either.
         let hit = matches!(self.open.as_ref().and_then(|o| o.cached.as_ref()), Some((n, _)) if *n == pcm_len);
         if !hit {
-            let Some(built) = self.compute()? else { return Ok(None) };
+            let built = self.compute()?;
             self.open.as_mut().expect("open").cached = Some((pcm_len, built));
+        }
+        if !matches!(self.open.as_ref().and_then(|o| o.cached.as_ref()), Some((_, Some(_)))) {
+            return Ok(None);
         }
 
         let o = self.open.as_ref().expect("open");
-        let b = o.cached.as_ref().map(|(_, b)| b).expect("just cached");
+        let b = o.cached.as_ref().and_then(|(_, b)| b.as_ref()).expect("just checked");
         let clip_path = match (&self.clip_dir, is_final) {
             (Some(d), true) => write_wav(d, &o.id, &o.pcm).ok().map(|p| p.to_string_lossy().to_string()),
             _ => None,
@@ -391,8 +435,12 @@ impl Sentencer {
     fn compute(&self) -> Result<Option<Built>> {
         let o = self.open.as_ref().expect("open");
         let cfg = &self.cfg;
-        let (src_lang, text) = self.engines.asr.transcribe(&o.pcm, &cfg.source_lang)?;
-        if text.trim().chars().count() < self.opts.min_chars {
+        let (src_lang, heard) = self.engines.asr.transcribe(&o.pcm, &cfg.source_lang)?;
+        // Whisper narrates what it cannot transcribe: a cough, a door slam or a burst of line
+        // noise comes back as "(Кашель)", "(coughing)" or "[static]". Nobody said those, so they
+        // must not be translated, shown, or allowed to reach the transcript.
+        let text = strip_non_speech(&heard);
+        if text.chars().count() < self.opts.min_chars || !text.chars().any(char::is_alphanumeric) {
             return Ok(None);
         }
 
@@ -660,6 +708,15 @@ mod tests {
             Ok(vec![])
         }
     }
+    /// Fake ASR that always "hears" the same thing, counting how often it is asked.
+    struct SaysAsr(&'static str, std::sync::atomic::AtomicUsize);
+    impl Transcriber for SaysAsr {
+        fn transcribe(&self, _: &[f32], _: &str) -> Result<(String, String)> {
+            self.1.fetch_add(1, Ordering::SeqCst);
+            Ok(("ru".into(), self.0.to_string()))
+        }
+    }
+
     /// Speaker = sign of the first sample. Two "voices" for tests.
     struct FakeEmb;
     impl SpeakerEmbedder for FakeEmb {
@@ -809,6 +866,69 @@ mod tests {
         s.push(Job { utt: utt(2, 1500, 1.0), role: SourceRole::Remote }).unwrap(); // grows, then finalises
         assert_eq!(counts.asr.load(Ordering::SeqCst), 2, "each distinct audio length transcribes once");
         assert_eq!(sink.final_only()[0].source_text, "я читаю книгу дома.");
+    }
+
+    #[test]
+    fn sound_events_are_stripped_whatever_language_whisper_wrote_them_in() {
+        for annotation in ["(Кашель)", "(coughing)", "(статика)", "[static]", "{noise}", "（音楽）", "*sighs*", "♪♪♪"]
+        {
+            assert_eq!(strip_non_speech(annotation), "", "{annotation:?} survived");
+        }
+        // Speech around an aside survives; the aside does not, and takes its spacing with it.
+        assert_eq!(strip_non_speech("(cough) Как дела?"), "Как дела?");
+        assert_eq!(strip_non_speech("Привет [static] как дела"), "Привет как дела");
+        // Untouched: no annotation, and a lone bracket that is just punctuation.
+        assert_eq!(strip_non_speech("я читаю книгу"), "я читаю книгу");
+        assert_eq!(strip_non_speech("смайлик :-)"), "смайлик :-)");
+    }
+
+    /// A cough or a burst of static clears the VAD like speech does, and Whisper labels it
+    /// "(Кашель)" / "(static)". None of that is a thing anybody said.
+    #[test]
+    fn a_sound_event_never_reaches_the_transcript() {
+        for heard in ["(Кашель)", "(coughing)", "(статика)", "[static]", "♪♪♪"] {
+            let asr = Arc::new(SaysAsr(heard, Default::default()));
+            let engines = Loaded {
+                asr: asr.clone(),
+                translator: Arc::new(FakeMt),
+                grammar: Some(Arc::new(NoGrammar)),
+                speaker: Some(Arc::new(FakeEmb)),
+                tts: Default::default(),
+            };
+            let sink = Arc::new(CollectSink::default());
+            let mut s = Sentencer::new(
+                engines,
+                cfg(),
+                Arc::new(Mutex::new(SpeakerRegistry::new(512))),
+                sink.clone(),
+                None,
+                None,
+            );
+
+            s.push(Job { utt: utt(2, 0, 1.0), role: SourceRole::Remote }).unwrap();
+            s.finalise().unwrap();
+
+            assert!(sink.all.lock().is_empty(), "{heard:?} was shown as a transcript");
+            assert_eq!(asr.1.load(Ordering::SeqCst), 1, "{heard:?} was transcribed twice");
+        }
+    }
+
+    /// An aside Whisper tacks onto real speech loses the aside, not the speech.
+    #[test]
+    fn speech_alongside_an_aside_is_kept() {
+        let engines = Loaded {
+            asr: Arc::new(SaysAsr("(cough) Я читаю книгу.", Default::default())),
+            translator: Arc::new(FakeMt),
+            grammar: Some(Arc::new(NoGrammar)),
+            speaker: Some(Arc::new(FakeEmb)),
+            tts: Default::default(),
+        };
+        let sink = Arc::new(CollectSink::default());
+        let mut s =
+            Sentencer::new(engines, cfg(), Arc::new(Mutex::new(SpeakerRegistry::new(512))), sink.clone(), None, None);
+        s.push(Job { utt: utt(2, 0, 1.0), role: SourceRole::Remote }).unwrap();
+        s.finalise().unwrap();
+        assert_eq!(sink.final_only()[0].source_text, "Я читаю книгу.");
     }
 
     #[test]
