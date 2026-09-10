@@ -5,14 +5,22 @@ Live translation, speaker detection and grammar coaching for video calls — one
 Join a Google Meet / Zoom / Teams call, press **Start listening**, and every utterance shows up as:
 
 - who said it (speakers are told apart by voice; your own mic is always "You")
-- the sentence in the language you're learning, in large serif type, with each word underlined by part of speech
+- the sentence in the language you're learning, in large serif type, with each word underlined by part of speech¹
 - the gloss in your native language underneath
-- hover any word for lemma, part of speech and case/tense; **Hear** / **Slower** / **Replay original** per line
+- hover any word for lemma, part of speech and case/tense¹; **Hear** / **Slower** / **Replay original** per line
 - optionally, the translation read aloud while the call audio is ducked underneath it
 - lines are provisional while someone is still talking, then rewritten in place once the sentence lands — words that moved or changed form flash briefly, so free-word-order languages like Russian don't leave you with a wrong first draft
 - each line shows arrival time and a live "3 min ago"; scrolling up pauses auto-follow, with a "N new · back to now" button to return
 
-Works in either direction: speech in your learning language is translated *to* your native language so you can follow; anything else (including what you say) is translated *into* the learning language so you see how you could have said it.
+Works in either direction: speech in your learning language is translated *to* your native language so you can follow; anything else (including what you say) is translated *into* the learning language so you see how you could have said it. If Whisper misidentifies the speaker's language, override it per source from the session setup panel.
+
+¹ POS underlining and hover grammar cards need a tagger model that currently has no working source (see [Known debt #1](ARCHITECTURE.md#known-debt-in-order-of-pain)) — plain text and no cards until one is hosted.
+
+A native-feeling Mac app: split-view sidebar (live + past meetings), unified toolbar, an inspector for per-session settings, and a Settings window (⌘,) for the rest — all in system colours, following light/dark/Increase Contrast.
+
+![Session setup, live transcript, a past meeting in dark mode, and search](docs/ui-preview.gif)
+
+*(Rendered with `just ui-preview`, the WKWebView harness described under [Build](#build) — no models or call needed.)*
 
 ## Meetings, people and history
 
@@ -57,6 +65,8 @@ just build     # → src-tauri/target/release/bundle/{macos,dmg}/
 Without devbox: Rust stable, Node 20, `cargo install tauri-cli --version "^2"`, then the `npm run tauri …` scripts. See CONTRIBUTING.md for the release flow (conventional commits → release-please).
 
 First `cargo build` pulls prebuilt sherpa-onnx and ONNX Runtime binaries (the `download-binaries` features), so it needs network once.
+
+`just ui-preview` renders the UI's main states to `out/ui-*.png` via a bare WKWebView with the Tauri bridge mocked — useful for checking a UI change without models, audio devices or screen-recording permission. See `scripts/ui-preview/README.md`.
 
 ### How revision works
 
@@ -123,15 +133,14 @@ See **ARCHITECTURE.md** for layers, data flow and step-by-step recipes for addin
 
 ## Status / roadmap
 
-This is a first end-to-end cut and has **not yet been compiled on a Mac** — expect to iterate on `sherpa-rs` / `ort` API names for the exact crate versions you land on. Things I'd do next, in order:
+Compiles, runs and is responsive on macOS Apple Silicon, with the native split-view shell described above. Things I'd do next, in order:
 
-1. Compile, fix bindings, smoke-test with `just demo some-recording.wav`.
-2. Token-level streaming within an utterance.
-3. Real morphology (see ARCHITECTURE.md → known debt).
-4. KV-cache + beam search in the NLLB decoder.
-5. Word alignment (source ↔ translation) for cross-highlighting on hover.
-6. Flashcard export (Anki) from hovered words — history already has everything needed.
-7. Per-person page: every sentence they've said to you, most-hovered words.
+1. Token-level streaming within an utterance.
+2. Real morphology (see ARCHITECTURE.md).
+3. KV-cache + beam search in the NLLB decoder.
+4. Word alignment (source ↔ translation) for cross-highlighting on hover.
+5. Flashcard export (Anki) from hovered words — history already has everything needed.
+6. Per-person page: every sentence they've said to you, most-hovered words.
 
 ## License
 
