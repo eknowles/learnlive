@@ -48,3 +48,24 @@ impl ToPipelineRate {
         Ok(out)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn stereo_48k_to_mono_16k_keeps_duration() {
+        let n = 48_000; // 1 s
+        let inter: Vec<f32> = (0..n).flat_map(|i| { let t = i as f32 / 48_000.0; let s = (t * 440.0 * std::f32::consts::TAU).sin() * 0.5; [s, s] }).collect();
+        let mut rs = ToPipelineRate::new(48_000, 2).unwrap();
+        let out = rs.push(&inter).unwrap();
+        // Resampler holds a partial block; expect ~1 s minus < 1 chunk.
+        assert!(out.len() > 15_000 && out.len() <= 16_000, "got {} samples", out.len());
+        let rms = (out.iter().map(|x| x * x).sum::<f32>() / out.len() as f32).sqrt();
+        assert!((rms - 0.5 / 2f32.sqrt()).abs() < 0.05, "level preserved, rms={rms}");
+    }
+    #[test]
+    fn passthrough_at_16k() {
+        let mut rs = ToPipelineRate::new(16_000, 1).unwrap();
+        assert_eq!(rs.push(&[0.1; 320]).unwrap().len(), 320);
+    }
+}

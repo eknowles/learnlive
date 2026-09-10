@@ -9,10 +9,12 @@ pub mod capture;
 pub mod mixer;
 pub mod resample;
 pub mod playback;
+pub mod file_source;
 
 pub use capture::{list_devices, Capture};
 pub use mixer::{Mixer, MixerCommand, MixFrame};
 pub use playback::Player;
+pub use file_source::{read_wav, write_wav16};
 
 /// Everything downstream of the mixer runs at this rate.
 pub const PIPELINE_RATE: u32 = 16_000;

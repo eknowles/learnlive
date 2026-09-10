@@ -4,21 +4,9 @@ import { speakerColor } from '../lib/pos'
 import { ago, clock, gap } from '../lib/time'
 import type { Segment, Token } from '../lib/types'
 import Word from './Word'
+import { changedIndices as changed } from '../lib/diff'
 
 interface Props { segments: Segment[]; learning: string; live: boolean; speechActive: boolean }
-
-/** Words present now that weren't in the previous revision — these get the brief highlight. */
-const changed = (prev: Token[] | undefined, next: Token[]) => {
-  if (!prev) return new Set<number>()
-  const before = new Map<string, number>()
-  prev.forEach(t => before.set(t.text, (before.get(t.text) ?? 0) + 1))
-  const out = new Set<number>()
-  next.forEach((t, i) => {
-    const n = before.get(t.text) ?? 0
-    if (n === 0) out.add(i); else before.set(t.text, n - 1)
-  })
-  return out
-}
 
 export default function Transcript({ segments, learning, live, speechActive }: Props) {
   const scroller = useRef<HTMLElement | null>(null)

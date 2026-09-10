@@ -1,0 +1,8 @@
+[
+  {"speaker": "Anna", "voice": "ru", "role": "remote", "text": "Привет, Эд! Как прошла твоя неделя?", "pause_ms": 1200},
+  {"speaker": "Ed",   "voice": "en", "role": "local",  "text": "It was busy. I worked on a new project.", "pause_ms": 900},
+  {"speaker": "Anna", "voice": "ru", "role": "remote", "text": "Расскажи мне о проекте,", "pause_ms": 700},
+  {"speaker": "Anna", "voice": "ru", "role": "remote", "text": "если это не секрет.", "pause_ms": 1500},
+  {"speaker": "Ed",   "voice": "en", "role": "local",  "text": "It translates conversations while you are speaking.", "pause_ms": 1000},
+  {"speaker": "Anna", "voice": "ru", "role": "remote", "text": "Звучит очень полезно. Я бы хотела попробовать.", "pause_ms": 800}
+]

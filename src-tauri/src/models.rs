@@ -103,6 +103,19 @@ pub fn is_present(model_dir: &Path, spec: &ModelSpec) -> bool {
 
 /// Download (and extract, for .tar.bz2) one model, emitting `model-progress` events.
 pub async fn ensure(app: &AppHandle, model_dir: &Path, spec: &ModelSpec) -> Result<PathBuf> {
+    let app = app.clone();
+    let id = spec.id.to_string();
+    ensure_with(model_dir, spec, move |bytes, total, done| {
+        let _ = app.emit("model-progress", ModelProgress { model: id.clone(), bytes, total, done });
+    }).await
+}
+
+/// Same, without Tauri (CI, scripts, tests).
+pub async fn ensure_headless(model_dir: &Path, spec: &ModelSpec) -> Result<PathBuf> {
+    ensure_with(model_dir, spec, |_, _, _| {}).await
+}
+
+async fn ensure_with(model_dir: &Path, spec: &ModelSpec, mut progress: impl FnMut(u64, Option<u64>, bool)) -> Result<PathBuf> {
     let target = model_dir.join(spec.dir);
     if is_present(model_dir, spec) {
         return Ok(target);
@@ -131,7 +144,7 @@ pub async fn ensure(app: &AppHandle, model_dir: &Path, spec: &ModelSpec) -> Resu
             let chunk = chunk?;
             file.write_all(&chunk).await?;
             bytes += chunk.len() as u64;
-            let _ = app.emit("model-progress", ModelProgress { model: spec.id.into(), bytes, total, done: false });
+            progress(bytes, total, false);
         }
         file.flush().await?;
 
@@ -140,7 +153,7 @@ pub async fn ensure(app: &AppHandle, model_dir: &Path, spec: &ModelSpec) -> Resu
             std::fs::remove_file(&dest)?;
         }
     }
-    let _ = app.emit("model-progress", ModelProgress { model: spec.id.into(), bytes: 0, total: None, done: true });
+    progress(0, None, true);
     Ok(target)
 }
 

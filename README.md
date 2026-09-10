@@ -78,6 +78,28 @@ src-tauri/src/
   commands.rs                Tauri command surface
 ```
 
+## Testing
+
+Three tiers, all in `.github/workflows/ci.yml` (macOS Apple Silicon runners):
+
+| Tier | Command | Needs | When |
+|---|---|---|---|
+| Unit | `cargo test` + `npm test` | nothing | every push |
+| Golden | `LEARNLIVE_MODELS=… cargo test --test golden -- --ignored` | models + fixtures | nightly, or PR label `golden` |
+| Bundle | `npx tauri build --ci` | Rust + Node | every push |
+
+**Unit** tests mock the engine traits and exercise the parts that are actually ours: mixer gain/mute/duck, resampler, the sentence-revision rules (`pipeline.rs` tests), the token diff and time helpers in the UI.
+
+**Golden** tests run `pipeline::run_offline()` on a WAV and assert thresholds, not strings: WER < 0.25, correct language ID and you/them role per line, exactly one remote speaker id, the split-sentence fixture merged, timings within 1 s. Fixtures are *generated* from `fixtures/*.script.json` with the same Piper voices the app ships, so ground truth is exact and nothing private is in the repo:
+
+```bash
+cargo run --bin model-fetch -- --models .models --asr small --langs ru,en
+cargo run --bin fixture-gen -- --models .models fixtures/ru-lesson.script.json fixtures/ru-lesson
+LEARNLIVE_MODELS=.models cargo test --test golden -- --ignored --nocapture
+```
+
+**A real meeting recording works too.** Export it as WAV and write an `.expected.jsonl` by hand (see `fixtures/README.md`). Mono makes everything "remote"; a stereo file with you on the left and the call on the right also tests the role split. You can also run the *live* app against a file: pick a source id of `file:/path/to/call.wav` and it's fed in at real-time pace through the normal mixer.
+
 ## Status / roadmap
 
 This is a first end-to-end cut and has **not yet been compiled on a Mac** — expect to iterate on `sherpa-rs` / `ort` API names for the exact crate versions you land on. Things I'd do next, in order:

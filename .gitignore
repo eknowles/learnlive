@@ -38,3 +38,8 @@ Thumbs.db
 
 # Logs
 *.log
+
+# generated fixtures (regenerate with fixture-gen; scripts are committed)
+src-tauri/fixtures/*.wav
+src-tauri/fixtures/*.expected.jsonl
+.models/

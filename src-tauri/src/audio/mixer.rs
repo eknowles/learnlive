@@ -54,18 +54,23 @@ impl Mixer {
         let live: Arc<RwLock<HashMap<String, Live>>> = Arc::new(RwLock::new(HashMap::new()));
         let mut captures = vec![];
         for s in sources {
-            let cap = Capture::start(&s.device_id, raw_tx.clone())?;
+            let (rate, ch) = if let Some(path) = s.device_id.strip_prefix("file:") {
+                // WAV standing in for a device (demo/test). Paced at real time so VAD timing matches.
+                let wav = super::file_source::read_wav(std::path::Path::new(path))?;
+                let (rate, ch) = (wav.sample_rate, wav.channels);
+                let (id, tx) = (s.device_id.clone(), raw_tx.clone());
+                thread::spawn(move || { let _ = super::file_source::feed(id, wav, tx, true); });
+                (rate, ch)
+            } else {
+                let cap = Capture::start(&s.device_id, raw_tx.clone())?;
+                let r = (cap.sample_rate, cap.channels);
+                captures.push(cap);
+                r
+            };
             live.write().insert(
                 s.device_id.clone(),
-                Live {
-                    gain: s.gain,
-                    muted: s.muted,
-                    role: s.role,
-                    resampler: ToPipelineRate::new(cap.sample_rate, cap.channels)?,
-                    buf: vec![],
-                },
+                Live { gain: s.gain, muted: s.muted, role: s.role, resampler: ToPipelineRate::new(rate, ch)?, buf: vec![] },
             );
-            captures.push(cap);
         }
         info!("mixer started with {} source(s)", captures.len());
 
@@ -129,5 +134,39 @@ impl Mixer {
         })?;
 
         Ok(Self { frames: frame_rx, commands: cmd_tx, _captures: captures })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Mixer maths without devices: drive the same summing code the thread runs.
+    use crate::types::SourceRole;
+
+    fn mix(frames: &[(&[f32], f32, bool, SourceRole)], duck: f32) -> (Vec<f32>, Option<SourceRole>) {
+        let n = frames[0].0.len();
+        let mut out = vec![0.0f32; n];
+        let mut loudest: Option<(SourceRole, f32)> = None;
+        for (pcm, gain, muted, role) in frames {
+            let g = if *muted { 0.0 } else { gain * if *role == SourceRole::Remote { duck } else { 1.0 } };
+            let mut e = 0.0;
+            for (o, x) in out.iter_mut().zip(*pcm) { let v = x * g; *o += v; e += v * v; }
+            let r = (e / n as f32).sqrt();
+            if loudest.map(|(_, lr)| r > lr).unwrap_or(true) { loudest = Some((*role, r)); }
+        }
+        for o in out.iter_mut() { *o = o.clamp(-1.0, 1.0); }
+        (out, loudest.filter(|(_, r)| *r > 0.005).map(|(r, _)| r))
+    }
+
+    #[test]
+    fn gain_mute_and_duck() {
+        let a = [0.5f32; 320]; let b = [0.2f32; 320];
+        let (m, dom) = mix(&[(&a, 1.0, false, SourceRole::Remote), (&b, 1.0, false, SourceRole::Local)], 1.0);
+        assert!((m[0] - 0.7).abs() < 1e-6); assert_eq!(dom, Some(SourceRole::Remote));
+        let (m, dom) = mix(&[(&a, 1.0, true, SourceRole::Remote), (&b, 1.0, false, SourceRole::Local)], 1.0);
+        assert!((m[0] - 0.2).abs() < 1e-6); assert_eq!(dom, Some(SourceRole::Local));
+        let (m, _) = mix(&[(&a, 1.0, false, SourceRole::Remote), (&b, 1.0, false, SourceRole::Local)], 0.5);
+        assert!((m[0] - 0.45).abs() < 1e-6, "remote ducked to half, local untouched");
+        let (m, _) = mix(&[(&a, 2.0, false, SourceRole::Remote), (&a, 2.0, false, SourceRole::Local)], 1.0);
+        assert_eq!(m[0], 1.0, "clamped");
     }
 }

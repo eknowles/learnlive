@@ -47,6 +47,18 @@ sha2 = "0.10"
 dirs = "5"
 uuid = { version = "1", features = ["v4"] }
 
+[[bin]]
+name = "learnlive"
+path = "src/main.rs"
+
+[[bin]]
+name = "fixture-gen"
+path = "src/bin/fixture-gen.rs"
+
+[[bin]]
+name = "model-fetch"
+path = "src/bin/model-fetch.rs"
+
 [features]
 default = []
 # Embed model files into the binary (large!). Off by default; models are fetched to the app data dir on first run.

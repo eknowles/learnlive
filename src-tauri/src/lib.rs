@@ -9,6 +9,7 @@
 pub mod audio;
 pub mod commands;
 pub mod engine;
+pub mod eval;
 pub mod models;
 pub mod pipeline;
 pub mod types;

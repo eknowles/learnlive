@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push: { branches: [main, master] }
+  pull_request:
+  schedule:
+    - cron: '0 3 * * *'   # nightly golden run
+
+env:
+  CARGO_TERM_COLOR: always
+  MODEL_DIR: ${{ github.workspace }}/.models
+
+jobs:
+  # Tier 1 — every push/PR. No models, no audio hardware: logic only.
+  unit:
+    runs-on: macos-14   # Apple Silicon, same target as the shipped .app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      # sherpa-onnx / ort prebuilt libs are fetched at build time; cache them with the target dir.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+  # Tier 2 — nightly or on the "golden" label. Real models, real audio, threshold asserts.
+  golden:
+    if: github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'golden')
+    runs-on: macos-14
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.MODEL_DIR }}
+          key: models-${{ hashFiles('src-tauri/src/models.rs') }}
+      - name: Fetch models
+        run: |
+          mkdir -p "$MODEL_DIR"
+          cargo run --manifest-path src-tauri/Cargo.toml --bin model-fetch -- --models "$MODEL_DIR" --asr small --langs ru,en
+      - name: Generate fixtures
+        run: cargo run --manifest-path src-tauri/Cargo.toml --bin fixture-gen -- --models "$MODEL_DIR" src-tauri/fixtures/ru-lesson.script.json src-tauri/fixtures/ru-lesson
+      - name: Golden tests
+        run: LEARNLIVE_MODELS="$MODEL_DIR" cargo test --manifest-path src-tauri/Cargo.toml --test golden -- --ignored --nocapture
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: golden-fixtures, path: src-tauri/fixtures/*.wav, retention-days: 3 }
+
+  # Tier 3 — does the app actually bundle?
+  build:
+    runs-on: macos-14
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - run: npm ci
+      - run: npx tauri build --ci
+      - uses: actions/upload-artifact@v4
+        with: { name: LearnLive-macos, path: src-tauri/target/release/bundle/dmg/*.dmg }
