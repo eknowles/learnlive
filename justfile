@@ -32,7 +32,18 @@ demo wav:
     LEARNLIVE_DEMO_SOURCE="file:{{wav}}" npx tauri dev
 
 # Production bundle → src-tauri/target/release/bundle/
+#
+# devbox's Nix shell sets DEVELOPER_DIR/SDKROOT to a Nix-repackaged Apple SDK, and puts Nix's own
+# cc/clang/xcrun ahead of Apple's on PATH. That toolchain implicitly links against Nix's own
+# libiconv, whose install name is its ephemeral /nix/store path rather than /usr/lib — a binary
+# built that way only runs on a Mac with that exact store path, i.e. nowhere but the machine (or
+# identical devbox.lock pin) that built it. Unset those and put /usr/bin first so the release
+# binary always links the real system libiconv.
 build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    unset DEVELOPER_DIR SDKROOT
+    export PATH="/usr/bin:/bin:$PATH"
     npx tauri build
 
 # Render the UI states to out/ui-*.png in a bare WKWebView with the Tauri bridge mocked (needs `npx vite`)

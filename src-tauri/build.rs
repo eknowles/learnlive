@@ -10,9 +10,10 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,-sectcreate,__TEXT,__info_plist,{}", plist.display());
 
         // sherpa-onnx and its bundled onnxruntime are dylibs linked as `@rpath/...`, but nothing
-        // emits an LC_RPATH, so the binary fails to launch with "no LC_RPATH's found". They are
-        // copied next to the executable (target/<profile>/ during development, Contents/MacOS or
-        // Contents/Frameworks in a bundle), so point the loader at both.
+        // emits an LC_RPATH, so the binary fails to launch with "no LC_RPATH's found". Cargo puts
+        // them next to the executable in target/<profile>/ during development, so point the
+        // loader there too; a real .app bundle needs them copied into Contents/Frameworks, which
+        // is what tauri.conf.json's bundle.macOS.frameworks does.
         for path in ["@executable_path", "@executable_path/../Frameworks", "@loader_path"] {
             println!("cargo:rustc-link-arg=-Wl,-rpath,{path}");
         }
