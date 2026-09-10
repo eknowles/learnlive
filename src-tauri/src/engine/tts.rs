@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use parking_lot::Mutex;
 use sherpa_rs::tts::{VitsTts, VitsTtsConfig};
 
@@ -17,8 +17,12 @@ impl Piper {
     pub fn load(model_dir: &Path, lang: &str) -> Result<Option<Self>> {
         let Some(spec) = crate::models::tts(lang) else { return Ok(None) };
         let dir = model_dir.join(spec.dir);
-        if !dir.exists() { return Ok(None); }
-        let onnx = std::fs::read_dir(&dir)?.filter_map(|e| e.ok()).map(|e| e.path())
+        if !dir.exists() {
+            return Ok(None);
+        }
+        let onnx = std::fs::read_dir(&dir)?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
             .find(|p| p.extension().map(|x| x == "onnx").unwrap_or(false));
         let Some(onnx) = onnx else { return Ok(None) };
         let cfg = VitsTtsConfig {
@@ -34,7 +38,7 @@ impl Piper {
 
 impl Synthesizer for Piper {
     fn synthesize(&self, text: &str) -> Result<(Vec<f32>, u32)> {
-        let audio = self.inner.lock().create(text, 0, 1.0)?;
+        let audio = self.inner.lock().create(text, 0, 1.0).map_err(|e| anyhow!("tts: {e}"))?;
         Ok((audio.samples, audio.sample_rate))
     }
 }

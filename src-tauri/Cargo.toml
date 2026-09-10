@@ -5,6 +5,7 @@ description = "Live translation, speaker detection and grammar coaching for vide
 authors = ["Ed Knowles"]
 edition = "2021"
 rust-version = "1.77"
+default-run = "learnlive"
 
 [lib]
 name = "learnlive_lib"
@@ -36,9 +37,9 @@ ringbuf = "0.4"
 sherpa-rs = { version = "0.6", features = ["download-binaries"] }
 
 # Machine translation (NLLB-200) and POS tagging via ONNX Runtime
-ort = { version = "2.0.0-rc.9", features = ["download-binaries"] }
+ort = { version = "2.0.0-rc.13", features = ["download-binaries"] }
 tokenizers = { version = "0.20", default-features = false, features = ["onig"] }
-ndarray = "0.16"
+ndarray = "0.17"   # must match the ndarray ort re-exports
 
 # Model download / cache
 reqwest = { version = "0.12", features = ["stream", "rustls-tls"], default-features = false }
@@ -54,8 +55,8 @@ rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 # Calendar via EventKit (no Tauri plugin exists for it; the bridge is in src/calendar.rs)
 objc2 = "0.5"
-objc2-foundation = { version = "0.2", features = ["NSDate", "NSString", "NSArray", "NSURL", "NSError"] }
-objc2-event-kit = { version = "0.2", features = ["EKEventStore", "EKEvent", "EKCalendarItem", "EKParticipant", "EKTypes"] }
+objc2-foundation = { version = "0.2", features = ["NSDate", "NSString", "NSArray", "NSURL", "NSError", "NSObject", "NSPredicate"] }
+objc2-event-kit = { version = "0.2", features = ["EKEventStore", "EKEvent", "EKCalendar", "EKCalendarItem", "EKObject", "EKParticipant", "EKTypes", "block2"] }
 block2 = "0.5"
 
 [[bin]]
@@ -69,6 +70,10 @@ path = "src/bin/fixture-gen.rs"
 [[bin]]
 name = "model-fetch"
 path = "src/bin/model-fetch.rs"
+
+[[bin]]
+name = "bench-latency"
+path = "src/bin/bench-latency.rs"
 
 [features]
 default = []

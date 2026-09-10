@@ -21,6 +21,7 @@ export default function Setup({ cfg, setCfg, devices, languages, models, progres
   const missing = models.filter(m => !m.present)
   const missingMb = missing.reduce((a, m) => a + m.approx_mb, 0)
   const loopback = devices.filter(d => d.is_loopback)
+  const learning = languages.find(l => l.code === cfg.learning)
   const remote = cfg.sources.find(s => s.role === 'remote')
   const local = cfg.sources.find(s => s.role === 'local')
 
@@ -41,6 +42,9 @@ export default function Setup({ cfg, setCfg, devices, languages, models, progres
             </option>
           ))}
         </select>
+        {learning && !learning.grammar && (
+          <small className="hint">No grammar tagger installed, so words won't be clickable. Everything else works.</small>
+        )}
       </label>
       <label>
         I already speak

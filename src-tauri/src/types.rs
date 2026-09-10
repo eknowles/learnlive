@@ -112,13 +112,6 @@ pub struct SpeakerRef {
     pub confidence: f32,
 }
 
-/// Live feedback while an utterance is still being spoken (partial ASR).
-#[derive(Debug, Clone, Serialize)]
-pub struct Partial {
-    pub speaker: Option<u32>,
-    pub text: String,
-}
-
 /// Progress for model downloads / warm-up.
 #[derive(Debug, Clone, Serialize)]
 pub struct ModelProgress {
@@ -139,13 +132,16 @@ pub struct Levels {
 // ---- calendar & history ---------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Attendee { pub name: String, pub email: String }
+pub struct Attendee {
+    pub name: String,
+    pub email: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CalendarEvent {
     pub id: String,
     pub title: String,
-    pub start: i64,        // unix seconds
+    pub start: i64, // unix seconds
     pub end: i64,
     pub attendees: Vec<Attendee>,
     pub url: Option<String>,

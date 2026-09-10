@@ -17,6 +17,13 @@ use parking_lot::Mutex;
 
 use crate::types::{SessionConfig, Token};
 
+/// `ort`'s builder errors are `ort::Error<SessionBuilder>` — they hand the builder back so you
+/// can retry, which makes them neither `Send` nor `Sync` and so unusable with `anyhow`.
+/// Stringify at the boundary; nothing upstream inspects them.
+pub(crate) fn ort_err<E: std::fmt::Display>(e: E) -> anyhow::Error {
+    anyhow::anyhow!("onnxruntime: {e}")
+}
+
 pub trait Transcriber: Send + Sync {
     /// Returns (language code, text). `lang_hint` = "auto" or ISO-639-1.
     fn transcribe(&self, pcm16k: &[f32], lang_hint: &str) -> Result<(String, String)>;
@@ -88,9 +95,13 @@ impl Engines {
 
     /// Ensure models are in memory. Prefer `load()`.
     pub fn warm(&self, cfg: &SessionConfig) -> Result<()> {
-        if self.asr.lock().is_none() || *self.loaded_asr.lock() != cfg.asr_model {
-            *self.asr.lock() = Some(Arc::new(asr::WhisperOnnx::load(&self.model_dir, &cfg.asr_model)?));
-            *self.loaded_asr.lock() = cfg.asr_model.clone();
+        // The source language is baked into the recognizer at construction, so it is part of the
+        // cache key alongside the model size.
+        let asr_key = format!("{}|{}", cfg.asr_model, cfg.source_lang);
+        if self.asr.lock().is_none() || *self.loaded_asr.lock() != asr_key {
+            let engine = asr::WhisperOnnx::load(&self.model_dir, &cfg.asr_model, &cfg.source_lang)?;
+            *self.asr.lock() = Some(Arc::new(engine));
+            *self.loaded_asr.lock() = asr_key;
         }
         if cfg.diarize && self.speaker.lock().is_none() {
             *self.speaker.lock() = Some(Arc::new(diarize::Eres2Net::load(&self.model_dir)?));
@@ -99,7 +110,11 @@ impl Engines {
             *self.translator.lock() = Some(Arc::new(translate::Nllb::load(&self.model_dir)?));
         }
         if self.grammar.lock().is_none() {
-            *self.grammar.lock() = Some(Arc::new(grammar::UdPos::load(&self.model_dir)?));
+            // Optional: without it, segments simply carry no tokens and the UI shows plain text.
+            match grammar::UdPos::load(&self.model_dir) {
+                Ok(g) => *self.grammar.lock() = Some(Arc::new(g)),
+                Err(e) => log::warn!("grammar tagger unavailable, word cards disabled: {e:#}"),
+            }
         }
         if cfg.speak_translations {
             let mut tts = self.tts.lock();

@@ -8,8 +8,8 @@
 
 pub mod audio;
 pub mod calendar;
-pub mod db;
 pub mod commands;
+pub mod db;
 pub mod engine;
 pub mod error;
 pub mod eval;
@@ -17,8 +17,8 @@ pub mod models;
 pub mod pipeline;
 pub mod types;
 
-use std::sync::Arc;
 use parking_lot::Mutex;
+use std::sync::Arc;
 use tauri::Manager;
 
 /// Global app state handed to every command.

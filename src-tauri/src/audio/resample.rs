@@ -55,7 +55,13 @@ mod tests {
     #[test]
     fn stereo_48k_to_mono_16k_keeps_duration() {
         let n = 48_000; // 1 s
-        let inter: Vec<f32> = (0..n).flat_map(|i| { let t = i as f32 / 48_000.0; let s = (t * 440.0 * std::f32::consts::TAU).sin() * 0.5; [s, s] }).collect();
+        let inter: Vec<f32> = (0..n)
+            .flat_map(|i| {
+                let t = i as f32 / 48_000.0;
+                let s = (t * 440.0 * std::f32::consts::TAU).sin() * 0.5;
+                [s, s]
+            })
+            .collect();
         let mut rs = ToPipelineRate::new(48_000, 2).unwrap();
         let out = rs.push(&inter).unwrap();
         // Resampler holds a partial block; expect ~1 s minus < 1 chunk.

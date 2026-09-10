@@ -21,7 +21,9 @@ pub async fn speak(state: State<'_, AppState>, text: String, lang: String, speed
         let voice = {
             let mut tts = engines.tts.lock();
             if !tts.contains_key(&lang) {
-                if let Some(v) = crate::engine::tts::Piper::load(&engines.model_dir, &lang)? { tts.insert(lang.clone(), Arc::new(v)); }
+                if let Some(v) = crate::engine::tts::Piper::load(&engines.model_dir, &lang)? {
+                    tts.insert(lang.clone(), Arc::new(v));
+                }
             }
             tts.get(&lang).cloned()
         };
@@ -31,7 +33,9 @@ pub async fn speak(state: State<'_, AppState>, text: String, lang: String, speed
         player.play(&pcm, rate);
         std::thread::sleep(std::time::Duration::from_millis((pcm.len() as f32 / rate as f32 * 1000.0) as u64));
         Ok(())
-    }).await?.map_err(|e| AppError::models(format!("{e:#}")))
+    })
+    .await?
+    .map_err(|e| AppError::models(format!("{e:#}")))
 }
 
 /// Replay the original audio of a segment.

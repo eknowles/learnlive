@@ -65,6 +65,16 @@ fixtures:
       cargo run --manifest-path {{manifest}} --bin fixture-gen -- --models "{{models}}" "$s" "$stem"
     done
 
+# How long after you speak does a word appear? (needs `just models`)
+bench wav asr="tiny":
+    cargo run --release --manifest-path {{manifest}} --bin bench-latency -- \
+      --models "{{models}}" --wav "{{wav}}" --asr {{asr}}
+
+# Same, sweeping the VAD settings that dominate latency
+bench-sweep wav asr="tiny":
+    cargo run --release --manifest-path {{manifest}} --bin bench-latency -- \
+      --models "{{models}}" --wav "{{wav}}" --asr {{asr}} --sweep
+
 # Golden tests with real models (needs `just models` and `just fixtures`)
 golden:
     LEARNLIVE_MODELS="{{models}}" cargo test --manifest-path {{manifest}} --test golden -- --ignored --nocapture

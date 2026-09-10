@@ -14,5 +14,5 @@ pub async fn calendar_events_near_now() -> CmdResult<Vec<CalendarEvent>> {
 #[tauri::command]
 pub fn link_meeting(state: State<AppState>, meeting_id: i64, event: CalendarEvent) -> CmdResult<MeetingSummary> {
     state.db.link_event(meeting_id, &event.id, &event.title, &super::session::attendees(&event))?;
-    Ok(state.db.meeting_summary(meeting_id)?.ok_or_else(|| crate::error::AppError::invalid("meeting not found"))?)
+    state.db.meeting_summary(meeting_id)?.ok_or_else(|| crate::error::AppError::invalid("meeting not found"))
 }
