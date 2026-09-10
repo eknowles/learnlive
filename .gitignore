@@ -15,6 +15,8 @@ dist/
 # Tauri
 src-tauri/target/
 src-tauri/Cargo.lock
+# generated from tauri.conf.json + capabilities at build time
+src-tauri/gen/schemas/
 
 # IDE
 .vscode/
@@ -43,3 +45,7 @@ Thumbs.db
 src-tauri/fixtures/*.wav
 src-tauri/fixtures/*.expected.jsonl
 .models/
+
+# ui-preview renders
+out/
+scripts/ui-preview/render

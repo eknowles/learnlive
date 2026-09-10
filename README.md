@@ -18,7 +18,7 @@ Works in either direction: speech in your learning language is translated *to* y
 
 - **Calendar link.** On Start, LearnLive looks at your calendar (macOS EventKit, read‑only, permission prompt on first use) for a meeting in progress or about to start and attaches the session to it. Attach later from the Meeting panel if it guessed wrong or you started early.
 - **Speakers → people.** With an invite linked, each detected speaker gets a dropdown of attendees. Pick "Anna" and every line from that voice is relabelled, now and in history.
-- **Remembered voices** (off by default, History → checkbox). When on, the voice of anyone you've *named* is averaged into a local voiceprint and they're recognised from their first sentence next time. Stored only in the local SQLite file; turning it off deletes all of them; per‑person forget is a command away.
+- **Remembered voices** (off by default, Settings → Privacy). When on, the voice of anyone you've *named* is averaged into a local voiceprint and they're recognised from their first sentence next time. Stored only in the local SQLite file; turning it off deletes all of them; per‑person forget is a command away.
 - **History.** Every finalised sentence is written to `learnlive.sqlite` in the app data dir, with FTS5 search across all meetings in both languages ("книгу", "book", prefix*). Open any meeting and you get the same reading surface with hover cards and clip replay.
 
 Tauri has no calendar plugin; `src-tauri/src/calendar.rs` is a small `objc2` bridge to EventKit and is macOS‑only for now (Windows/Linux would need the Google Calendar API).
@@ -74,14 +74,18 @@ Windows: WASAPI loopback devices show up automatically. Linux: PulseAudio/PipeWi
 
 ```
 src/                       React UI (TypeScript)
-  components/Setup.tsx       languages, devices, model download, start/stop
-  components/Mixer.tsx       live per-source gain, mute, meters
-  components/Speakers.tsx    detected speakers, rename
-  components/Meeting.tsx     pick / show the linked calendar event
-  components/History.tsx     past meetings, open, search, remember-voices toggle
+  App.tsx                    window shell: sidebar | toolbar over (content | inspector)
+  windows/Settings.tsx       the Settings window (⌘,), opened by the Rust shell
+  components/shell/          Sidebar (live + past meetings), Toolbar, Inspector
+  components/panels/         inspector panels: session setup, mixer, speakers, meeting, details
+  components/views/          content: LiveView, MeetingView, SearchResults
   components/Transcript.tsx  the reading surface
   components/Word.tsx        hover card + pronunciation
+  components/ui/             Button, Form (Group/Row), Switch, SearchField, Banner, Icon
+  hooks/                     useSession, useTranscript, useHistory, useLayout, useMenu
   lib/api.ts                 typed wrapper over Tauri commands/events
+  lib/prefs.ts               persisted config, shared with the Settings window
+  styles/                    tokens (AppKit system colours), base, controls, shell, transcript
 src-tauri/src/
   audio/                     capture, mixer, resample, playback, file_source
   calendar.rs                EventKit bridge (macOS) — no Tauri plugin exists for calendars
@@ -89,7 +93,8 @@ src-tauri/src/
   engine/                    asr, diarize, translate, grammar, tts, vad, languages
   pipeline.rs                session orchestration (audio thread + ML thread)
   models.rs                  manifest + downloader
-  commands.rs                Tauri command surface
+  commands/                  Tauri command surface, one file per concern
+  native.rs                  menu bar, window lifecycle, Settings window
 ```
 
 ## Testing

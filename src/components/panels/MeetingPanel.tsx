@@ -1,18 +1,21 @@
 import { useEffect, useState } from 'react'
-import { api } from '../lib/api'
-import { clock } from '../lib/time'
-import type { CalendarEvent, MeetingSummary } from '../lib/types'
+import { api } from '../../lib/api'
+import { asAppError, describe } from '../../lib/errors'
+import { clock } from '../../lib/time'
+import type { CalendarEvent, MeetingSummary } from '../../lib/types'
+import Button from '../ui/Button'
+import { Group, Row } from '../ui/Form'
 
 interface Props {
-  phase: string
+  live: boolean
   meeting: MeetingSummary | null
   pending: CalendarEvent | null // chosen before Start
   onPending: (e: CalendarEvent | null) => void
   onLinked: (m: MeetingSummary) => void
 }
 
-/** Which calendar event is this session? Shown before Start (pick) and during (linked). */
-export default function Meeting({ phase, meeting, pending, onPending, onLinked }: Props) {
+/** Which calendar event is this session? Pick before Start; shown as linked during. */
+export default function MeetingPanel({ live, meeting, pending, onPending, onLinked }: Props) {
   const [events, setEvents] = useState<CalendarEvent[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -21,9 +24,10 @@ export default function Meeting({ phase, meeting, pending, onPending, onLinked }
       .calendarNearNow()
       .then(evs => {
         setEvents(evs)
+        setError(null)
         if (!pending && evs.length === 1 && !meeting) onPending(evs[0])
       })
-      .catch(e => setError(String(e)))
+      .catch(e => setError(describe(asAppError(e))))
 
   useEffect(() => {
     load()
@@ -35,24 +39,22 @@ export default function Meeting({ phase, meeting, pending, onPending, onLinked }
   }
 
   const linked = meeting?.calendar_event_id ? meeting : null
+  const caption = error
+    ? error
+    : linked
+      ? `${clock(linked.started_at * 1000).slice(0, 5)} · ${linked.participants.length} invited`
+      : events === null
+        ? 'Looking at your calendar…'
+        : events.length === 0
+          ? 'Nothing on your calendar right now. The session is saved untitled; you can attach it later.'
+          : undefined
+
   return (
-    <section className="meeting" aria-label="Meeting">
-      <h2>Meeting</h2>
-      {error && <p className="quiet small">{error}</p>}
+    <Group title="Meeting">
       {linked ? (
-        <p className="linked">
-          <b>{linked.title}</b>
-          <br />
-          <span className="quiet">
-            {clock(linked.started_at * 1000)} · {linked.participants.length} invited
-          </span>
-        </p>
+        <Row label={linked.title} caption={caption} />
       ) : (
-        <>
-          {events === null && !error && <p className="quiet small">Looking at your calendar…</p>}
-          {events && events.length === 0 && (
-            <p className="quiet small">Nothing on your calendar right now. The session will be saved untitled; you can attach it later.</p>
-          )}
+        <Row label="Calendar event" caption={caption} stack={!!events?.length}>
           {events && events.length > 0 && (
             <select value={pending?.id ?? ''} onChange={e => choose(events.find(x => x.id === e.target.value) ?? null)}>
               <option value="">Not a calendar meeting</option>
@@ -63,13 +65,9 @@ export default function Meeting({ phase, meeting, pending, onPending, onLinked }
               ))}
             </select>
           )}
-          {phase === 'live' && (
-            <button className="small" onClick={load}>
-              Refresh
-            </button>
-          )}
-        </>
+          {(live || error) && <Button variant="plain" icon="arrow.clockwise" aria-label="Refresh calendar" onClick={load} />}
+        </Row>
       )}
-    </section>
+    </Group>
   )
 }

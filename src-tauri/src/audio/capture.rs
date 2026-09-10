@@ -8,9 +8,16 @@ use crate::types::AudioDevice;
 const LOOPBACK_HINTS: &[&str] = &["blackhole", "loopback", "aggregate", "soundflower", "vb-cable", "monitor of"];
 
 /// Enumerate input devices. IDs are the device names (cpal has no stable ID), which is fine on macOS.
+///
+/// If `LEARNLIVE_DEMO_SOURCE` points at a WAV it is offered as a device too, so the app can be
+/// driven from a recording without a call (`just demo <wav>`). The mixer understands the
+/// `file:` prefix; see `audio::file_source`.
 pub fn list_devices() -> Result<Vec<AudioDevice>> {
     let host = cpal::default_host();
     let mut out = vec![];
+    if let Some(demo) = demo_source() {
+        out.push(demo);
+    }
     for dev in host.input_devices()? {
         let name = dev.name().unwrap_or_else(|_| "Unknown".into());
         let cfg = match dev.default_input_config() {
@@ -30,6 +37,31 @@ pub fn list_devices() -> Result<Vec<AudioDevice>> {
         });
     }
     Ok(out)
+}
+
+/// A WAV standing in for a call, from `LEARNLIVE_DEMO_SOURCE`.
+fn demo_source() -> Option<AudioDevice> {
+    let path = std::env::var("LEARNLIVE_DEMO_SOURCE").ok().filter(|p| !p.is_empty())?;
+    let path = path.strip_prefix("file:").unwrap_or(&path).to_string();
+    let wav = match super::file_source::read_wav(std::path::Path::new(&path)) {
+        Ok(w) => w,
+        Err(e) => {
+            warn!("LEARNLIVE_DEMO_SOURCE {path}: {e}");
+            return None;
+        }
+    };
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+    Some(AudioDevice {
+        id: format!("file:{path}"),
+        name: format!("Demo recording — {name}"),
+        input_channels: wav.channels,
+        default_sample_rate: wav.sample_rate,
+        // Treated as the "call" side so `defaultSources` picks it as the remote source.
+        is_loopback: true,
+    })
 }
 
 /// Raw audio from one device: interleaved samples at the device's native rate/channels.
@@ -69,7 +101,12 @@ impl Capture {
                 device.build_input_stream(
                     &cfg.into(),
                     move |data: &[f32], _| {
-                        let _ = tx.try_send(RawChunk { device_id: id.clone(), sample_rate, channels, samples: data.to_vec() });
+                        let _ = tx.try_send(RawChunk {
+                            device_id: id.clone(),
+                            sample_rate,
+                            channels,
+                            samples: data.to_vec(),
+                        });
                     },
                     err_fn,
                     None,

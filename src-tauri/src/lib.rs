@@ -8,17 +8,18 @@
 
 pub mod audio;
 pub mod calendar;
-pub mod db;
 pub mod commands;
+pub mod db;
 pub mod engine;
 pub mod error;
 pub mod eval;
 pub mod models;
+pub mod native;
 pub mod pipeline;
 pub mod types;
 
-use std::sync::Arc;
 use parking_lot::Mutex;
+use std::sync::Arc;
 use tauri::Manager;
 
 /// Global app state handed to every command.
@@ -34,7 +35,24 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        // Remember the main window's frame, but not its visibility: closing hides it, and a
+        // hidden window must not come back hidden on the next launch.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED
+                        | tauri_plugin_window_state::StateFlags::FULLSCREEN,
+                )
+                .with_denylist(&[native::SETTINGS])
+                .build(),
+        )
         .setup(|app| {
+            let menu = native::build_menu(app.handle())?;
+            app.manage(menu);
             let model_dir = models::model_dir(app.handle())?;
             let data = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data)?;
@@ -47,7 +65,10 @@ pub fn run() {
             });
             Ok(())
         })
+        .on_menu_event(native::on_menu_event)
+        .on_window_event(native::on_window_event)
         .invoke_handler(all_commands!())
-        .run(tauri::generate_context!())
-        .expect("error while running LearnLive");
+        .build(tauri::generate_context!())
+        .expect("error while building LearnLive")
+        .run(|app, event| native::on_run_event(app, &event));
 }

@@ -29,7 +29,7 @@ mod imp {
     use objc2::rc::Retained;
     use objc2::runtime::Bool;
     use objc2_event_kit::{EKAuthorizationStatus, EKEntityType, EKEvent, EKEventStore, EKParticipant};
-    use objc2_foundation::{NSArray, NSDate, NSError, NSString};
+    use objc2_foundation::{NSArray, NSDate, NSError};
 
     fn store() -> Retained<EKEventStore> {
         unsafe { EKEventStore::new() }
@@ -38,18 +38,26 @@ mod imp {
     /// Ask once; the OS remembers. Blocks up to 30 s for the user to answer the prompt.
     fn ensure_access(store: &EKEventStore) -> Result<()> {
         let status = unsafe { EKEventStore::authorizationStatusForEntityType(EKEntityType::Event) };
-        if status == EKAuthorizationStatus::FullAccess || status == EKAuthorizationStatus::Authorized {
+        if status == EKAuthorizationStatus::FullAccess {
             return Ok(());
         }
+        if status == EKAuthorizationStatus::Denied || status == EKAuthorizationStatus::Restricted {
+            anyhow::bail!("Calendar access was declined. Allow LearnLive in System Settings \u{2192} Privacy & Security \u{2192} Calendars.");
+        }
         let (tx, rx) = mpsc::channel::<bool>();
-        let block = RcBlock::new(move |granted: Bool, _err: *mut NSError| { let _ = tx.send(granted.as_bool()); });
+        let block = RcBlock::new(move |granted: Bool, _err: *mut NSError| {
+            let _ = tx.send(granted.as_bool());
+        });
         unsafe {
             // macOS 14+: full access; older: entity access. Both resolve through the same callback.
-            store.requestFullAccessToEventsWithCompletion(&block);
+            // The generated binding takes a raw `*mut Block`; `block` owns it for the call.
+            store.requestFullAccessToEventsWithCompletion(&*block as *const _ as *mut _);
         }
         match rx.recv_timeout(Duration::from_secs(30)) {
             Ok(true) => Ok(()),
-            Ok(false) => anyhow::bail!("Calendar access was declined. Allow LearnLive in System Settings → Privacy & Security → Calendars."),
+            Ok(false) => anyhow::bail!(
+                "Calendar access was declined. Allow LearnLive in System Settings → Privacy & Security → Calendars."
+            ),
             Err(_) => anyhow::bail!("Calendar permission prompt timed out"),
         }
     }
@@ -64,18 +72,32 @@ mod imp {
             store.eventsMatchingPredicate(&pred)
         };
         let mut out = vec![];
-        for ev in events.iter() {
+        for i in 0..events.count() {
             unsafe {
-                let attendees = ev.attendees().map(|a| {
-                    a.iter().map(|p: &EKParticipant| {
-                        let name = p.name().map(|n| n.to_string()).unwrap_or_default();
-                        // EKParticipant.URL is mailto:someone@example.com
-                        let email = p.URL().absoluteString().map(|u| u.to_string()).unwrap_or_default();
-                        let email = email.strip_prefix("mailto:").unwrap_or(&email).to_string();
-                        crate::types::Attendee { name: if name.is_empty() { email.clone() } else { name }, email }
-                    }).collect::<Vec<_>>()
-                }).unwrap_or_default();
-                let url = ev.URL().and_then(|u| u.absoluteString()).map(|s| s.to_string())
+                let ev = events.objectAtIndex(i);
+                let ev = &*ev;
+                let attendees = ev
+                    .attendees()
+                    .map(|a| {
+                        (0..a.count())
+                            .map(|j| {
+                                let p: Retained<EKParticipant> = a.objectAtIndex(j);
+                                let name = p.name().map(|n| n.to_string()).unwrap_or_default();
+                                // EKParticipant.URL is mailto:someone@example.com
+                                let email = p.URL().absoluteString().map(|u| u.to_string()).unwrap_or_default();
+                                let email = email.strip_prefix("mailto:").unwrap_or(&email).to_string();
+                                crate::types::Attendee {
+                                    name: if name.is_empty() { email.clone() } else { name },
+                                    email,
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let url = ev
+                    .URL()
+                    .and_then(|u| u.absoluteString())
+                    .map(|s| s.to_string())
                     .or_else(|| ev.notes().and_then(|n| first_meeting_link(&n.to_string())));
                 out.push(CalendarEvent {
                     id: ev.eventIdentifier().map(|s| s.to_string()).unwrap_or_default(),
@@ -88,13 +110,26 @@ mod imp {
                 });
             }
         }
-        // Keep the type checker honest about NSString usage in this module.
-        let _ = NSString::from_str("");
         Ok(out)
     }
 
     fn first_meeting_link(notes: &str) -> Option<String> {
-        notes.split_whitespace().find(|w| w.contains("meet.google.com") || w.contains("zoom.us/j") || w.contains("teams.microsoft.com")).map(|s| s.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != ':' && c != '.' && c != '?' && c != '=' && c != '-' && c != '_').to_string())
+        notes
+            .split_whitespace()
+            .find(|w| w.contains("meet.google.com") || w.contains("zoom.us/j") || w.contains("teams.microsoft.com"))
+            .map(|s| {
+                s.trim_matches(|c: char| {
+                    !c.is_alphanumeric()
+                        && c != '/'
+                        && c != ':'
+                        && c != '.'
+                        && c != '?'
+                        && c != '='
+                        && c != '-'
+                        && c != '_'
+                })
+                .to_string()
+            })
     }
 }
 

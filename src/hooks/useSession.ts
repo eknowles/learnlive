@@ -1,37 +1,53 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
-import { DEFAULT_CONFIG, defaultSources, modelKey } from '../lib/config'
-import { asAppError, describe } from '../lib/errors'
+import { defaultSources, modelKey } from '../lib/config'
+import { asAppError, type AppError } from '../lib/errors'
+import { loadConfig, onConfigChanged, saveConfig } from '../lib/prefs'
 import type { AudioDevice, CalendarEvent, Language, Levels, MeetingSummary, ModelProgress, ModelStatus, SessionConfig } from '../lib/types'
 
 export type Phase = 'setup' | 'downloading' | 'starting' | 'live'
 
-/** Everything about the current session: config, devices, models, start/stop, live levels. */
-export function useSession(onStarted?: () => void) {
-  const [cfg, setCfg] = useState<SessionConfig>(DEFAULT_CONFIG)
+/** Everything about the current session: config, devices, models, start/stop, live levels.
+ *  Config is persisted and mirrored to the Settings window (see lib/prefs.ts). */
+export function useSession(onStarted?: () => void, onStopped?: () => void) {
+  const [cfg, setCfgState] = useState<SessionConfig>(loadConfig)
   const [devices, setDevices] = useState<AudioDevice[]>([])
   const [languages, setLanguages] = useState<Language[]>([])
   const [models, setModels] = useState<ModelStatus[]>([])
   const [progress, setProgress] = useState<Record<string, ModelProgress>>({})
   const [phase, setPhase] = useState<Phase>('setup')
   const [levels, setLevels] = useState<Levels | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<AppError | null>(null)
   const [meeting, setMeeting] = useState<MeetingSummary | null>(null)
   const [pendingEvent, setPendingEvent] = useState<CalendarEvent | null>(null)
+
+  /** Local edits persist + broadcast; edits arriving from the other window only update state. */
+  const setCfg = useCallback((update: SessionConfig | ((c: SessionConfig) => SessionConfig)) => {
+    setCfgState(prev => {
+      const next = typeof update === 'function' ? update(prev) : update
+      saveConfig(next)
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     api
       .devices()
       .then(ds => {
         setDevices(ds)
-        setCfg(c => ({ ...c, sources: defaultSources(ds) }))
+        // Keep remembered sources that still exist; otherwise pick sensible defaults.
+        setCfgState(c => {
+          const kept = c.sources.filter(s => ds.some(d => d.id === s.device_id))
+          return { ...c, sources: kept.length ? kept : defaultSources(ds) }
+        })
       })
-      .catch(e => setError(describe(asAppError(e))))
+      .catch(e => setError(asAppError(e)))
     api.languages().then(setLanguages)
     const subs = Promise.all([
       api.onLevels(setLevels),
       api.onModelProgress(p => setProgress(prev => ({ ...prev, [p.model]: p }))),
-      api.onError(m => setError(m)),
+      api.onError(m => setError({ kind: 'internal', message: m })),
+      onConfigChanged(setCfgState),
     ])
     return () => {
       subs.then(fns => fns.forEach(f => f()))
@@ -46,7 +62,12 @@ export function useSession(onStarted?: () => void) {
       .catch(() => {})
   }, [key])
 
+  useEffect(() => {
+    api.setListening(phase === 'live').catch(() => {})
+  }, [phase])
+
   const start = async () => {
+    if (phase !== 'setup') return
     setError(null)
     try {
       if (models.some(m => !m.present)) {
@@ -59,14 +80,16 @@ export function useSession(onStarted?: () => void) {
       onStarted?.()
       setPhase('live')
     } catch (e) {
-      setError(describe(asAppError(e)))
+      setError(asAppError(e))
       setPhase('setup')
     }
   }
   const stop = async () => {
+    if (phase !== 'live') return
     await api.stop()
     setPhase('setup')
     setPendingEvent(null)
+    onStopped?.()
   }
 
   return {
@@ -79,6 +102,7 @@ export function useSession(onStarted?: () => void) {
     phase,
     levels,
     error,
+    dismissError: () => setError(null),
     meeting,
     setMeeting,
     pendingEvent,

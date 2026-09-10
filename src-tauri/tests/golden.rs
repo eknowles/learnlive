@@ -12,7 +12,14 @@ use learnlive_lib::types::SessionConfig;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-struct Expected { speaker: String, role: String, lang: String, text: String, start_ms: u64, end_ms: u64 }
+struct Expected {
+    speaker: String,
+    role: String,
+    lang: String,
+    text: String,
+    start_ms: u64,
+    end_ms: u64,
+}
 
 fn load(stem: &str) -> (PathBuf, Vec<Expected>) {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures");
@@ -31,12 +38,22 @@ fn engines() -> Arc<Engines> {
 #[ignore]
 fn ru_lesson_transcript_speakers_and_merge() {
     let (wav, expected) = load("ru-lesson");
-    let cfg = SessionConfig { learning: "ru".into(), native: "en".into(), speak_translations: false, asr_model: "small".into(), ..Default::default() };
+    let cfg = SessionConfig {
+        learning: "ru".into(),
+        native: "en".into(),
+        speak_translations: false,
+        asr_model: "small".into(),
+        ..Default::default()
+    };
     let got = run_offline(engines(), &cfg, &wav).expect("offline run");
 
     // 1. Sentence count: lines 3+4 of the script must have merged into one.
     let exp_sentences = expected.len() - 1;
-    assert!((got.len() as i64 - exp_sentences as i64).abs() <= 1, "expected ~{exp_sentences} sentences, got {}", got.len());
+    assert!(
+        (got.len() as i64 - exp_sentences as i64).abs() <= 1,
+        "expected ~{exp_sentences} sentences, got {}",
+        got.len()
+    );
 
     // 2. Transcript quality over the whole session (order-preserving concat).
     let ref_all = expected.iter().map(|e| e.text.as_str()).collect::<Vec<_>>().join(" ");
@@ -48,27 +65,45 @@ fn ru_lesson_transcript_speakers_and_merge() {
     for s in &got {
         let nearest = expected.iter().min_by_key(|e| (e.start_ms as i64 - s.started_ms as i64).abs()).unwrap();
         assert_eq!(s.source_lang, nearest.lang, "language ID wrong on: {}", s.source_text);
-        let want_role = if nearest.role == "local" { learnlive_lib::types::SourceRole::Local } else { learnlive_lib::types::SourceRole::Remote };
+        let want_role = if nearest.role == "local" {
+            learnlive_lib::types::SourceRole::Local
+        } else {
+            learnlive_lib::types::SourceRole::Remote
+        };
         assert_eq!(s.role, want_role, "role split wrong on: {}", s.source_text);
     }
 
-    // 4. Speakers: exactly two distinct ids, and remote ones are all the same person.
-    let remote_ids: std::collections::BTreeSet<u32> = got.iter().filter(|s| s.role == learnlive_lib::types::SourceRole::Remote).map(|s| s.speaker.id).collect();
+    // 4. Speakers: one id per person in the script, and remote lines are all the same person.
+    let remote_ids: std::collections::BTreeSet<u32> =
+        got.iter().filter(|s| s.role == learnlive_lib::types::SourceRole::Remote).map(|s| s.speaker.id).collect();
     assert_eq!(remote_ids.len(), 1, "Anna should be one speaker, got ids {remote_ids:?}");
     assert!(got.iter().any(|s| s.speaker.label == "You"));
+    let want_speakers: std::collections::BTreeSet<&str> = expected.iter().map(|e| e.speaker.as_str()).collect();
+    let got_speakers: std::collections::BTreeSet<u32> = got.iter().map(|s| s.speaker.id).collect();
+    assert_eq!(
+        got_speakers.len(),
+        want_speakers.len(),
+        "script has speakers {want_speakers:?}, got ids {got_speakers:?}"
+    );
 
     // 5. Translation sanity: Russian lines translated to English should resemble a reasonable gloss.
     // We don't have reference translations for TTS'd Russian, so assert direction + non-degeneracy.
     for s in got.iter().filter(|s| s.source_lang == "ru") {
         assert_eq!(s.target_lang, "en");
-        assert!(s.target_text.chars().any(|c| c.is_ascii_alphabetic()), "no Latin text in translation of: {}", s.source_text);
+        assert!(
+            s.target_text.chars().any(|c| c.is_ascii_alphabetic()),
+            "no Latin text in translation of: {}",
+            s.source_text
+        );
         assert!(chrf(&s.source_text, &s.target_text) < 0.5, "translation looks like a copy of the source");
     }
 
-    // 6. Timing: every final sentence starts within 1 s of a scripted line.
+    // 6. Timing: every final sentence starts within 1 s of a scripted line, and none runs
+    //    past the end of the audio.
+    let script_end = expected.iter().map(|e| e.end_ms).max().unwrap_or(0);
     for s in &got {
         let d = expected.iter().map(|e| (e.start_ms as i64 - s.started_ms as i64).abs()).min().unwrap();
         assert!(d < 1000, "sentence at {} ms is {d} ms from any scripted start", s.started_ms);
+        assert!(s.ended_ms <= script_end + 2000, "sentence ends at {} ms, past the {script_end} ms script", s.ended_ms);
     }
-    let _ = expected.iter().map(|e| (&e.speaker, e.end_ms)).count();
 }

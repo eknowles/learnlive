@@ -1,0 +1,134 @@
+/* Resets and the few rules that make a webview stop feeling like a web page. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+html,
+body,
+#root {
+  height: 100%;
+}
+html {
+  background: transparent; /* the window's vibrancy shows through the sidebar */
+}
+body {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.38;
+  color: var(--label);
+  background: transparent;
+  overflow: hidden;
+  cursor: default; /* AppKit: arrow everywhere except editable text */
+  user-select: none;
+  -webkit-user-select: none;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+.selectable,
+.selectable * {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: auto;
+}
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: default;
+  text-align: left;
+  border-radius: var(--radius-control);
+}
+button:disabled {
+  opacity: 0.45;
+}
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 1px;
+}
+/* Native controls: leave WebKit's AppKit rendering alone, only size the text. */
+select,
+input,
+progress {
+  font: inherit;
+  font-size: 13px;
+  color: var(--label);
+  max-width: 100%;
+}
+input[type='range'] {
+  width: 100%;
+  margin: 0;
+}
+input[type='checkbox'] {
+  margin: 0;
+}
+input[type='text'],
+input:not([type]) {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-field);
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+input[type='search'] {
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+ul,
+ol {
+  list-style: none;
+}
+h1,
+h2,
+h3 {
+  font-weight: 600;
+  line-height: 1.25;
+}
+b {
+  font-weight: 600;
+}
+.caption {
+  font-size: 11px;
+  color: var(--label-2);
+}
+.secondary {
+  color: var(--label-2);
+}
+.link {
+  color: var(--accent);
+  border-radius: 3px;
+}
+.link:hover {
+  text-decoration: underline;
+}
+.link-quiet {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--label-3);
+}
+kbd {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-window);
+  color: var(--label-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

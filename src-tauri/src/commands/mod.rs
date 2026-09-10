@@ -1,6 +1,7 @@
 //! Tauri command surface, one file per concern. Commands are thin: validate, call into the
 //! crate, map errors. Logic lives in `pipeline`, `db`, `calendar`, `models`.
 
+pub mod app;
 pub mod calendar;
 pub mod history;
 pub mod models;
@@ -32,6 +33,9 @@ macro_rules! all_commands {
             $crate::commands::history::get_remember_voices,
             $crate::commands::history::set_remember_voices,
             $crate::commands::history::forget_voice,
+            $crate::commands::app::set_listening,
+            $crate::commands::app::open_settings,
+            $crate::commands::app::open_privacy_settings,
         ]
     };
 }

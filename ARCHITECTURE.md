@@ -34,7 +34,16 @@ cpal / file:  ─▶ audio::Mixer ─▶ 20 ms frames @16 kHz ─▶ engine::vad
                           AppHandle (UI event)  +  DbSink (SQLite)  +  Voice (TTS, ducked)
 ```
 
-Threads in a live session: **vad** (audio → utterances), **ml** (utterances → sentences), plus cpal's own callback threads. They talk over bounded crossbeam channels; the ML thread dropping an utterance under load is logged, never fatal.
+Threads in a live session: **mixer** (owns the cpal input streams, sums to 20 ms frames), **vad**
+(frames → utterances), **ml** (utterances → sentences), **voice** (TTS + ducking), **out** (owns
+the cpal output stream), plus cpal's own callback threads. They talk over bounded crossbeam
+channels; the ML thread dropping an utterance under load is logged, never fatal.
+
+`cpal::Stream` is `!Send + !Sync`, so it can never be reachable from `AppState` (Tauri requires
+managed state to be `Send + Sync`, and every command would stop compiling). The rule: **a cpal
+stream is created on, and owned for the life of, the thread that uses it** — `audio::mixer` for
+inputs, `audio::playback` for the output. What crosses a thread boundary is a channel endpoint or
+an `Arc<Mutex<VecDeque<f32>>>`, never a stream.
 
 ## Recipes
 
@@ -55,12 +64,37 @@ That's it — translation, POS tagging and language ID already cover it.
 3. Add the typed wrapper in `src/lib/api.ts`. Components call `api.*`, never `invoke`.
 
 ### Add a UI panel
-Components under `src/components/` are presentational: props in, `api.*` calls out. Session state lives in `hooks/useSession.ts`, transcript state in `hooks/useTranscript.ts`. New cross‑cutting state → a new hook, not more `useState` in `App.tsx`.
+Components under `src/components/` are presentational: props in, `api.*` calls out. Session state lives in `hooks/useSession.ts`, transcript state in `hooks/useTranscript.ts`, past meetings and search in `hooks/useHistory.ts`. New cross‑cutting state → a new hook, not more `useState` in `App.tsx`.
+
+The window is laid out like a native Mac app and new UI should land in the matching place:
+
+- **Sidebar** (`components/shell/Sidebar.tsx`): navigation only — the live session and past meetings.
+- **Toolbar** (`components/shell/Toolbar.tsx`): title, primary action, search, inspector toggle. Keep it to one row of capsule buttons.
+- **Content** (`components/views/`): what you read. Scrolls independently; `[data-scroller]` is what `Transcript` follows.
+- **Inspector** (`components/panels/`): everything you *set*. Build panels from `ui/Form`'s `Group`/`Row` so they look like System Settings.
+- **Settings window** (`windows/Settings.tsx`): app‑wide preferences that rarely change. Per‑session choices stay in the inspector.
+
+Rules of the native shell:
+
+- Colours and fonts come from `styles/tokens.css`, which maps AppKit system colours (`-apple-system-*`) to variables. Never hard‑code a hex colour in a component; accent, dark mode and Increase Contrast then follow the system.
+- Controls that WebKit renders natively (`<select>`, checkboxes, `<input type=checkbox switch>`, sliders, `<progress>`, search fields) are left with their default appearance. Style text size, not the control.
+- Anything a Mac would do with a real NSMenu or NSAlert goes through Tauri: menu bar items in `src-tauri/src/native.rs` (forwarded as the `menu` event, handled in `hooks/useMenu.ts`), context menus via `lib/contextMenu.ts`, confirmations via `lib/dialogs.ts`. No `window.confirm`, no styled fake menus.
+- Config that must survive relaunch or reach the Settings window goes through `lib/prefs.ts` (localStorage + a `config-changed` event); per‑window UI state (sidebar width, inspector visibility) uses `useLayout`.
 
 ### Add a persisted field
 1. Extend `types::Segment` / `MeetingSummary` (Rust) and `src/lib/types.ts` (TS) together.
 2. Add a migration step in `db.rs` (append to `SCHEMA`; SQLite `CREATE … IF NOT EXISTS` is idempotent, use `ALTER TABLE` guarded by a `PRAGMA user_version` bump for real migrations).
 3. Update `row_to_segment` / `insert_segment`, and the `db.rs` tests.
+
+### Make it feel faster
+Latency is dominated by two things, in this order:
+1. **When the VAD closes an utterance** — nothing reaches the screen before that. `SegmenterOptions`
+   (`engine/vad.rs`): `min_silence_ms` is the floor on "how long after I stop talking", and
+   `max_speech_ms` is the worst case if you never pause.
+2. **Translation.** NLLB is ~10x the cost of Whisper-tiny per utterance (measure it: the bench
+   reports per-stage totals). ASR runs at ~0.04x real time; MT at ~0.4x.
+
+Change a default only with a `just bench-sweep` before/after in the commit message.
 
 ### Tune sentence revision
 `pipeline::SentenceOptions`. Unit tests in `pipeline.rs` document the intended behaviour; change a default only with a test that shows why.
@@ -75,11 +109,32 @@ Components under `src/components/` are presentational: props in, `api.*` calls o
 | WER / chrF | `eval.rs` tests | – |
 | Token diff, time helpers | `src/__tests__` (vitest) | – |
 | End‑to‑end on audio | `tests/golden.rs` | models + fixtures |
+| Latency (audio → words) | `just bench <wav>` | models |
 
 ## Known debt (in order of pain)
 
-1. **Rust has not been compiled on a Mac yet.** `sherpa-rs` / `ort` / `objc2-event-kit` method names will need reconciling with the crate versions that resolve.
+1. **The grammar/POS feature is off.** `models.rs::pos()` points at
+   `wietsedv/xlm-roberta-base-ft-udpos28-all`, which does not exist — that family is published
+   per language (`-en`, `-ru`, …) and as PyTorch weights only, and no multilingual UPOS model on
+   the Hub has an ONNX export. So `pos()` is excluded from `required()`, the model is marked
+   `optional`, `Engines::warm` logs and continues when it will not load, and segments carry no
+   tokens (`Transcript.tsx` falls back to plain text). To turn it back on: export
+   `wietsedv/xlm-roberta-base-ft-udpos28-<lang>` with `optimum` to quantized ONNX, host it,
+   make `pos()` take a language, and put it back in `required()`. `list_languages` already
+   reports `grammar` from what is on disk, so a hand-placed tagger re-enables the cards.
 2. Lemmas and case/tense are heuristics (`grammar.rs`). Replace with a UD parser export; the `Token` shape already has room.
-3. NLLB decoding has no KV cache (re‑runs the prefix each step). Fine for sentences, slow for monologues.
-4. Clips are raw 16 kHz WAV (~2 MB/min). Opus + a retention setting would be sensible before history grows.
-5. Calendar is macOS‑only. `calendar.rs` has the stub for a Google Calendar route.
+3. **sherpa-onnx aborts the process on bad input** — `exit(-1)`, not an error you can catch.
+   Whisper does it for a language outside the model's table (`"auto"` is *not* a code; empty
+   means auto-detect), and there are similar paths in the VAD and speaker models. Validate
+   before handing anything to sherpa; see `asr.rs::pin_language`.
+4. NLLB-200 is a sentence-level model: given two sentences it translates the first, emits EOS and
+   drops the rest. `translate.rs::split_sentences` splits before translating, at the cost of
+   splitting abbreviations too.
+5. NLLB decoding has no KV cache (re-runs the prefix each step), so it uses the plain
+   `decoder_model_quantized.onnx` rather than the `_merged` export — the merged graph declares
+   every `past_key_values.*` as a required input and cannot be driven without a real cache.
+   Fine for sentences, slow for monologues.
+6. Pressing Stop drops whatever the VAD is still holding. `run_offline` calls
+   `Segmenter::flush`; the live session does not, because the ML thread is already exiting.
+7. Clips are raw 16 kHz WAV (~2 MB/min). Opus + a retention setting would be sensible before history grows.
+8. Calendar is macOS‑only. `calendar.rs` has the stub for a Google Calendar route.

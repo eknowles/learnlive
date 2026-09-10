@@ -65,6 +65,10 @@ END;
 CREATE TRIGGER IF NOT EXISTS segments_ad AFTER DELETE ON segments BEGIN
   INSERT INTO segments_fts(segments_fts, rowid, source_text, target_text) VALUES ('delete', old.rowid, old.source_text, old.target_text);
 END;
+CREATE TRIGGER IF NOT EXISTS segments_au AFTER UPDATE OF source_text, target_text ON segments BEGIN
+  INSERT INTO segments_fts(segments_fts, rowid, source_text, target_text) VALUES ('delete', old.rowid, old.source_text, old.target_text);
+  INSERT INTO segments_fts(rowid, source_text, target_text) VALUES (new.rowid, new.source_text, new.target_text);
+END;
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 "#;
 
@@ -87,21 +91,40 @@ impl Db {
     // ---- settings -------------------------------------------------------------------------
 
     pub fn remember_voices(&self) -> bool {
-        self.conn.lock().query_row("SELECT value FROM settings WHERE key='remember_voices'", [], |r| r.get::<_, String>(0))
-            .optional().ok().flatten().map(|v| v == "1").unwrap_or(false)
+        self.conn
+            .lock()
+            .query_row("SELECT value FROM settings WHERE key='remember_voices'", [], |r| r.get::<_, String>(0))
+            .optional()
+            .ok()
+            .flatten()
+            .map(|v| v == "1")
+            .unwrap_or(false)
     }
     pub fn set_remember_voices(&self, on: bool) -> Result<()> {
-        self.conn.lock().execute("INSERT INTO settings(key,value) VALUES('remember_voices',?1) ON CONFLICT(key) DO UPDATE SET value=?1", params![if on { "1" } else { "0" }])?;
-        if !on { self.conn.lock().execute("UPDATE participants SET voiceprint=NULL, voiceprint_n=0", [])?; }
+        self.conn.lock().execute(
+            "INSERT INTO settings(key,value) VALUES('remember_voices',?1) ON CONFLICT(key) DO UPDATE SET value=?1",
+            params![if on { "1" } else { "0" }],
+        )?;
+        if !on {
+            self.conn.lock().execute("UPDATE participants SET voiceprint=NULL, voiceprint_n=0", [])?;
+        }
         Ok(())
     }
 
     // ---- meetings -------------------------------------------------------------------------
 
-    pub fn start_meeting(&self, title: &str, event_id: Option<&str>, cfg: &SessionConfig, started_at: i64) -> Result<i64> {
+    pub fn start_meeting(
+        &self,
+        title: &str,
+        event_id: Option<&str>,
+        cfg: &SessionConfig,
+        started_at: i64,
+    ) -> Result<i64> {
         let c = self.conn.lock();
-        c.execute("INSERT INTO meetings(title, calendar_event_id, started_at, learning, native) VALUES(?,?,?,?,?)",
-            params![title, event_id, started_at, cfg.learning, cfg.native])?;
+        c.execute(
+            "INSERT INTO meetings(title, calendar_event_id, started_at, learning, native) VALUES(?,?,?,?,?)",
+            params![title, event_id, started_at, cfg.learning, cfg.native],
+        )?;
         Ok(c.last_insert_rowid())
     }
 
@@ -110,13 +133,25 @@ impl Db {
         Ok(())
     }
 
-    pub fn link_event(&self, meeting_id: i64, event_id: &str, title: &str, attendees: &[(String, Option<String>)]) -> Result<()> {
+    pub fn link_event(
+        &self,
+        meeting_id: i64,
+        event_id: &str,
+        title: &str,
+        attendees: &[(String, Option<String>)],
+    ) -> Result<()> {
         let mut c = self.conn.lock();
         let tx = c.transaction()?;
-        tx.execute("UPDATE meetings SET calendar_event_id=?, title=? WHERE id=?", params![event_id, title, meeting_id])?;
+        tx.execute(
+            "UPDATE meetings SET calendar_event_id=?, title=? WHERE id=?",
+            params![event_id, title, meeting_id],
+        )?;
         for (name, email) in attendees {
             let pid = upsert_participant(&tx, name, email.as_deref())?;
-            tx.execute("INSERT OR IGNORE INTO meeting_participants(meeting_id, participant_id) VALUES(?,?)", params![meeting_id, pid])?;
+            tx.execute(
+                "INSERT OR IGNORE INTO meeting_participants(meeting_id, participant_id) VALUES(?,?)",
+                params![meeting_id, pid],
+            )?;
         }
         tx.commit()?;
         Ok(())
@@ -127,10 +162,19 @@ impl Db {
         let mut c = self.conn.lock();
         let tx = c.transaction()?;
         let pid = upsert_participant(&tx, name, email)?;
-        tx.execute("UPDATE meeting_participants SET speaker_id=NULL WHERE meeting_id=? AND speaker_id=?", params![meeting_id, speaker_id])?;
-        tx.execute("INSERT INTO meeting_participants(meeting_id, participant_id, speaker_id) VALUES(?,?,?) \
-                    ON CONFLICT(meeting_id, participant_id) DO UPDATE SET speaker_id=excluded.speaker_id", params![meeting_id, pid, speaker_id])?;
-        tx.execute("UPDATE segments SET speaker_label=? WHERE meeting_id=? AND speaker_id=?", params![name, meeting_id, speaker_id])?;
+        tx.execute(
+            "UPDATE meeting_participants SET speaker_id=NULL WHERE meeting_id=? AND speaker_id=?",
+            params![meeting_id, speaker_id],
+        )?;
+        tx.execute(
+            "INSERT INTO meeting_participants(meeting_id, participant_id, speaker_id) VALUES(?,?,?) \
+                    ON CONFLICT(meeting_id, participant_id) DO UPDATE SET speaker_id=excluded.speaker_id",
+            params![meeting_id, pid, speaker_id],
+        )?;
+        tx.execute(
+            "UPDATE segments SET speaker_label=? WHERE meeting_id=? AND speaker_id=?",
+            params![name, meeting_id, speaker_id],
+        )?;
         tx.commit()?;
         Ok(pid)
     }
@@ -141,14 +185,23 @@ impl Db {
         let rows = st.query_map([limit], row_to_meeting)?.collect::<Result<Vec<_>, _>>()?;
         drop(st);
         let mut out = vec![];
-        for mut m in rows { m.participants = participants_of(&c, m.id)?; out.push(m); }
+        for mut m in rows {
+            m.participants = participants_of(&c, m.id)?;
+            out.push(m);
+        }
         Ok(out)
     }
 
     pub fn meeting_summary(&self, id: i64) -> Result<Option<MeetingSummary>> {
         let c = self.conn.lock();
         let m = c.query_row(&format!("{MEETING_SELECT} WHERE m.id=?"), [id], row_to_meeting).optional()?;
-        match m { Some(mut m) => { m.participants = participants_of(&c, m.id)?; Ok(Some(m)) } None => Ok(None) }
+        match m {
+            Some(mut m) => {
+                m.participants = participants_of(&c, m.id)?;
+                Ok(Some(m))
+            }
+            None => Ok(None),
+        }
     }
 
     pub fn meeting(&self, id: i64) -> Result<Option<(MeetingSummary, Vec<Segment>)>> {
@@ -160,9 +213,18 @@ impl Db {
     }
 
     pub fn insert_segment(&self, meeting_id: i64, s: &Segment) -> Result<()> {
+        // Upsert rather than INSERT OR REPLACE: REPLACE deletes the row and inserts a new one
+        // with a *fresh* rowid, which orphans the external-content FTS entry keyed on the old
+        // one. It also skips the AFTER DELETE trigger unless recursive_triggers is on, so the
+        // stale text would stay searchable forever. ON CONFLICT keeps the rowid and fires
+        // segments_au.
         self.conn.lock().execute(
-            "INSERT OR REPLACE INTO segments(id, meeting_id, speaker_id, speaker_label, role, started_ms, ended_ms, arrived_at, source_lang, source_text, target_lang, target_text, tokens, clip_path) \
-             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO segments(id, meeting_id, speaker_id, speaker_label, role, started_ms, ended_ms, arrived_at, source_lang, source_text, target_lang, target_text, tokens, clip_path) \
+             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) \
+             ON CONFLICT(id) DO UPDATE SET speaker_id=excluded.speaker_id, speaker_label=excluded.speaker_label, \
+               role=excluded.role, started_ms=excluded.started_ms, ended_ms=excluded.ended_ms, arrived_at=excluded.arrived_at, \
+               source_lang=excluded.source_lang, source_text=excluded.source_text, target_lang=excluded.target_lang, \
+               target_text=excluded.target_text, tokens=excluded.tokens, clip_path=excluded.clip_path",
             params![s.id, meeting_id, s.speaker.id, s.speaker.label, role_str(s.role), s.started_ms as i64, s.ended_ms as i64, s.arrived_at as i64,
                     s.source_lang, s.source_text, s.target_lang, s.target_text, serde_json::to_string(&s.tokens)?, s.clip_path])?;
         Ok(())
@@ -174,11 +236,19 @@ impl Db {
         let mut st = c.prepare(
             "SELECT s.*, m.title, m.started_at FROM segments_fts f \
              JOIN segments s ON s.rowid = f.rowid JOIN meetings m ON m.id = s.meeting_id \
-             WHERE segments_fts MATCH ? ORDER BY bm25(segments_fts), m.started_at DESC LIMIT ?")?;
-        let rows = st.query_map(params![query, limit], |r| {
-            let segment = row_to_segment(r)?;
-            Ok(SearchHit { meeting_id: r.get("meeting_id")?, meeting_title: r.get(14)?, started_at: r.get(15)?, segment })
-        })?.collect::<Result<Vec<_>, _>>()?;
+             WHERE segments_fts MATCH ? ORDER BY bm25(segments_fts), m.started_at DESC LIMIT ?",
+        )?;
+        let rows = st
+            .query_map(params![query, limit], |r| {
+                let segment = row_to_segment(r)?;
+                Ok(SearchHit {
+                    meeting_id: r.get("meeting_id")?,
+                    meeting_title: r.get(14)?,
+                    started_at: r.get(15)?,
+                    segment,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 
@@ -188,23 +258,40 @@ impl Db {
     pub fn voiceprints(&self) -> Result<Vec<(i64, String, Vec<f32>)>> {
         let c = self.conn.lock();
         let mut st = c.prepare("SELECT id, name, voiceprint FROM participants WHERE voiceprint IS NOT NULL")?;
-        let rows = st.query_map([], |r| {
-            let blob: Vec<u8> = r.get(2)?;
-            Ok((r.get(0)?, r.get(1)?, blob.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect()))
-        })?.collect::<Result<Vec<_>, _>>()?;
+        let rows = st
+            .query_map([], |r| {
+                let blob: Vec<u8> = r.get(2)?;
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    blob.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect(),
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(rows)
     }
 
     /// Fold a new session centroid into the stored running mean.
     pub fn update_voiceprint(&self, participant_id: i64, centroid: &[f32], n_new: u32) -> Result<()> {
         let c = self.conn.lock();
-        let existing: Option<(Vec<u8>, i64)> = c.query_row("SELECT voiceprint, voiceprint_n FROM participants WHERE id=?", [participant_id],
-            |r| Ok((r.get::<_, Option<Vec<u8>>>(0)?, r.get(1)?))).optional()?.and_then(|(b, n)| b.map(|b| (b, n)));
+        let existing: Option<(Vec<u8>, i64)> = c
+            .query_row("SELECT voiceprint, voiceprint_n FROM participants WHERE id=?", [participant_id], |r| {
+                Ok((r.get::<_, Option<Vec<u8>>>(0)?, r.get(1)?))
+            })
+            .optional()?
+            .and_then(|(b, n)| b.map(|b| (b, n)));
         let (merged, n) = match existing {
             Some((blob, n0)) if n0 > 0 => {
-                let old: Vec<f32> = blob.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+                let old: Vec<f32> =
+                    blob.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
                 let total = n0 as f32 + n_new as f32;
-                (old.iter().zip(centroid).map(|(a, b)| (a * n0 as f32 + b * n_new as f32) / total).collect::<Vec<f32>>(), n0 + n_new as i64)
+                (
+                    old.iter()
+                        .zip(centroid)
+                        .map(|(a, b)| (a * n0 as f32 + b * n_new as f32) / total)
+                        .collect::<Vec<f32>>(),
+                    n0 + n_new as i64,
+                )
             }
             _ => (centroid.to_vec(), n_new as i64),
         };
@@ -214,7 +301,9 @@ impl Db {
     }
 
     pub fn forget_voice(&self, participant_id: i64) -> Result<()> {
-        self.conn.lock().execute("UPDATE participants SET voiceprint=NULL, voiceprint_n=0 WHERE id=?", [participant_id])?;
+        self.conn
+            .lock()
+            .execute("UPDATE participants SET voiceprint=NULL, voiceprint_n=0 WHERE id=?", [participant_id])?;
         Ok(())
     }
 
@@ -228,22 +317,36 @@ impl Db {
     }
 }
 
-const MEETING_SELECT: &str = "SELECT m.id, m.title, m.started_at, m.ended_at, m.learning, m.native, m.calendar_event_id, \
+const MEETING_SELECT: &str =
+    "SELECT m.id, m.title, m.started_at, m.ended_at, m.learning, m.native, m.calendar_event_id, \
     (SELECT COUNT(*) FROM segments s WHERE s.meeting_id=m.id) FROM meetings m";
 
 fn row_to_meeting(r: &rusqlite::Row) -> rusqlite::Result<MeetingSummary> {
     Ok(MeetingSummary {
-        id: r.get(0)?, title: r.get(1)?, started_at: r.get(2)?, ended_at: r.get(3)?, learning: r.get(4)?, native: r.get(5)?,
-        calendar_event_id: r.get(6)?, participants: vec![], sentence_count: r.get(7)?,
+        id: r.get(0)?,
+        title: r.get(1)?,
+        started_at: r.get(2)?,
+        ended_at: r.get(3)?,
+        learning: r.get(4)?,
+        native: r.get(5)?,
+        calendar_event_id: r.get(6)?,
+        participants: vec![],
+        sentence_count: r.get(7)?,
     })
 }
 
 fn upsert_participant(tx: &rusqlite::Transaction, name: &str, email: Option<&str>) -> Result<i64> {
     if let Some(e) = email {
-        tx.execute("INSERT INTO participants(name,email) VALUES(?,?) ON CONFLICT(email) DO UPDATE SET name=excluded.name", params![name, e])?;
+        tx.execute(
+            "INSERT INTO participants(name,email) VALUES(?,?) ON CONFLICT(email) DO UPDATE SET name=excluded.name",
+            params![name, e],
+        )?;
         return Ok(tx.query_row("SELECT id FROM participants WHERE email=?", [e], |r| r.get(0))?);
     }
-    if let Some(id) = tx.query_row("SELECT id FROM participants WHERE email IS NULL AND name=?", [name], |r| r.get::<_, i64>(0)).optional()? {
+    if let Some(id) = tx
+        .query_row("SELECT id FROM participants WHERE email IS NULL AND name=?", [name], |r| r.get::<_, i64>(0))
+        .optional()?
+    {
         return Ok(id);
     }
     tx.execute("INSERT INTO participants(name) VALUES(?)", [name])?;
@@ -251,30 +354,52 @@ fn upsert_participant(tx: &rusqlite::Transaction, name: &str, email: Option<&str
 }
 
 fn participants_of(c: &Connection, meeting_id: i64) -> Result<Vec<ParticipantRef>> {
-    let mut st = c.prepare("SELECT p.id, p.name, p.email, mp.speaker_id, p.voiceprint IS NOT NULL FROM meeting_participants mp \
-                            JOIN participants p ON p.id = mp.participant_id WHERE mp.meeting_id=? ORDER BY p.name")?;
-    let rows = st.query_map([meeting_id], |r| Ok(ParticipantRef {
-        id: r.get(0)?, name: r.get(1)?, email: r.get(2)?, speaker_id: r.get::<_, Option<i64>>(3)?.map(|x| x as u32), has_voiceprint: r.get(4)?,
-    }))?.collect::<Result<Vec<_>, _>>()?;
+    let mut st = c.prepare(
+        "SELECT p.id, p.name, p.email, mp.speaker_id, p.voiceprint IS NOT NULL FROM meeting_participants mp \
+                            JOIN participants p ON p.id = mp.participant_id WHERE mp.meeting_id=? ORDER BY p.name",
+    )?;
+    let rows = st
+        .query_map([meeting_id], |r| {
+            Ok(ParticipantRef {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                email: r.get(2)?,
+                speaker_id: r.get::<_, Option<i64>>(3)?.map(|x| x as u32),
+                has_voiceprint: r.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
-fn role_str(r: SourceRole) -> &'static str { match r { SourceRole::Local => "local", SourceRole::Remote => "remote" } }
+fn role_str(r: SourceRole) -> &'static str {
+    match r {
+        SourceRole::Local => "local",
+        SourceRole::Remote => "remote",
+    }
+}
 
 fn row_to_segment(r: &rusqlite::Row) -> rusqlite::Result<Segment> {
     let tokens: String = r.get("tokens")?;
     let role: String = r.get("role")?;
     Ok(Segment {
         id: r.get("id")?,
-        speaker: SpeakerRef { id: r.get::<_, i64>("speaker_id")? as u32, label: r.get("speaker_label")?, confidence: 1.0 },
+        speaker: SpeakerRef {
+            id: r.get::<_, i64>("speaker_id")? as u32,
+            label: r.get("speaker_label")?,
+            confidence: 1.0,
+        },
         role: if role == "local" { SourceRole::Local } else { SourceRole::Remote },
         started_ms: r.get::<_, i64>("started_ms")? as u64,
         ended_ms: r.get::<_, i64>("ended_ms")? as u64,
-        source_lang: r.get("source_lang")?, source_text: r.get("source_text")?,
-        target_lang: r.get("target_lang")?, target_text: r.get("target_text")?,
+        source_lang: r.get("source_lang")?,
+        source_text: r.get("source_text")?,
+        target_lang: r.get("target_lang")?,
+        target_text: r.get("target_text")?,
         tokens: serde_json::from_str(&tokens).unwrap_or_default(),
         clip_path: r.get("clip_path")?,
-        is_final: true, revision: 0,
+        is_final: true,
+        revision: 0,
         arrived_at: r.get::<_, i64>("arrived_at")? as u64,
     })
 }
@@ -283,9 +408,36 @@ fn row_to_segment(r: &rusqlite::Row) -> rusqlite::Result<Segment> {
 mod tests {
     use super::*;
     fn seg(id: &str, spk: u32, text: &str, target: &str) -> Segment {
-        Segment { id: id.into(), speaker: SpeakerRef { id: spk, label: format!("Speaker {spk}"), confidence: 0.7 }, role: SourceRole::Remote,
-            started_ms: 0, ended_ms: 1000, source_lang: "ru".into(), source_text: text.into(), target_lang: "en".into(), target_text: target.into(),
-            tokens: vec![], clip_path: None, is_final: true, revision: 0, arrived_at: 1 }
+        Segment {
+            id: id.into(),
+            speaker: SpeakerRef { id: spk, label: format!("Speaker {spk}"), confidence: 0.7 },
+            role: SourceRole::Remote,
+            started_ms: 0,
+            ended_ms: 1000,
+            source_lang: "ru".into(),
+            source_text: text.into(),
+            target_lang: "en".into(),
+            target_text: target.into(),
+            tokens: vec![],
+            clip_path: None,
+            is_final: true,
+            revision: 0,
+            arrived_at: 1,
+        }
+    }
+
+    #[test]
+    fn reinserting_a_segment_keeps_search_in_sync() {
+        let db = Db::in_memory().unwrap();
+        let m = db.start_meeting("t", None, &SessionConfig::default(), 1).unwrap();
+        db.insert_segment(m, &seg("a", 1, "первый вариант", "first draft")).unwrap();
+        assert_eq!(db.search("первый", 10).unwrap().len(), 1);
+
+        // A revision of the same sentence arrives under the same id.
+        db.insert_segment(m, &seg("a", 1, "второй вариант", "second draft")).unwrap();
+        assert_eq!(db.meeting(m).unwrap().unwrap().1.len(), 1, "should update, not duplicate");
+        assert!(db.search("первый", 10).unwrap().is_empty(), "stale text still searchable");
+        assert_eq!(db.search("второй", 10).unwrap().len(), 1, "new text not searchable");
     }
 
     #[test]
@@ -293,7 +445,13 @@ mod tests {
         let db = Db::in_memory().unwrap();
         let cfg = SessionConfig::default();
         let m = db.start_meeting("Untitled", None, &cfg, 1_700_000_000).unwrap();
-        db.link_event(m, "evt1", "Russian lesson", &[("Anna".into(), Some("anna@example.com".into())), ("Ed".into(), Some("ed@example.com".into()))]).unwrap();
+        db.link_event(
+            m,
+            "evt1",
+            "Russian lesson",
+            &[("Anna".into(), Some("anna@example.com".into())), ("Ed".into(), Some("ed@example.com".into()))],
+        )
+        .unwrap();
         db.insert_segment(m, &seg("a", 1, "Я читаю книгу дома.", "I am reading a book at home.")).unwrap();
         db.insert_segment(m, &seg("b", 1, "Звучит полезно.", "Sounds useful.")).unwrap();
 
@@ -304,7 +462,8 @@ mod tests {
         assert!(segs.iter().all(|s| s.speaker.label == "Anna"), "labels backfilled");
 
         let hits = db.search("книгу", 10).unwrap();
-        assert_eq!(hits.len(), 1); assert_eq!(hits[0].segment.id, "a");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].segment.id, "a");
         let hits = db.search("useful", 10).unwrap();
         assert_eq!(hits[0].meeting_title, "Russian lesson");
         assert_eq!(db.search("dom*", 10).unwrap().len(), 0, "only Latin prefix on Latin text");
