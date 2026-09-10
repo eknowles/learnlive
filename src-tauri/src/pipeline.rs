@@ -16,7 +16,7 @@ use log::{error, info, warn};
 use parking_lot::Mutex;
 use tauri::{AppHandle, Emitter};
 
-use crate::audio::{MixFrame, Mixer, MixerCommand, Player};
+use crate::audio::{MixFrame, Mixer, MixerCommand, Player, FRAME_SAMPLES};
 use crate::engine::diarize::{cosine, SpeakerRegistry};
 use crate::engine::vad::{Segmenter, Utterance};
 use crate::engine::{Engines, Loaded};
@@ -130,6 +130,8 @@ pub struct SessionHandle {
     mixer_cmd: Sender<MixerCommand>,
     pub speakers: Arc<Mutex<SpeakerRegistry>>,
     pub player: Arc<Player>,
+    /// Held by anything that plays through the speakers — see [`EchoGate`].
+    pub gate: Arc<EchoGate>,
     pub cfg: SessionConfig,
     pub meeting_id: i64,
 }
@@ -278,6 +280,72 @@ pub fn strip_non_speech(text: &str) -> String {
     kept.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// How long after our own audio stops that we carry on ignoring the input. It has to cover the
+/// capture buffers, the output device's own latency and the room's reverb tail; 600 ms is
+/// comfortably past all three without swallowing a reply.
+const ECHO_TAIL: Duration = Duration::from_millis(600);
+
+/// Stops the pipeline listening to its own voice.
+///
+/// Whatever we play reaches the microphone acoustically, and — when the call audio is captured
+/// through a loopback device — goes straight back down the remote source as well. Left alone
+/// that closes a loop: we speak the translation, hear it, transcribe it, translate it back and
+/// speak it again, forever, with the two languages ping-ponging.
+///
+/// Ducking the remote source could never fix this on its own. It is partial by default, it does
+/// not touch the microphone, and above all the mixer applies gain when a frame is *mixed* while
+/// the audio was captured some buffers earlier — so the tail of every spoken translation
+/// arrives after the duck has already lifted. Hence a gate with a hangover rather than a fader.
+pub struct EchoGate {
+    speaking: AtomicBool,
+    /// Once playback ends, keep suppressing until this instant.
+    until: Mutex<Option<Instant>>,
+    tail: Duration,
+}
+
+impl Default for EchoGate {
+    fn default() -> Self {
+        Self::with_tail(ECHO_TAIL)
+    }
+}
+
+impl EchoGate {
+    pub fn with_tail(tail: Duration) -> Self {
+        Self { speaking: AtomicBool::new(false), until: Mutex::new(None), tail }
+    }
+
+    /// Our own audio is about to start. Call before the first sample is queued.
+    pub fn begin(&self) {
+        self.speaking.store(true, Ordering::SeqCst);
+    }
+
+    /// Our own audio has finished. The tail keeps running after this returns.
+    pub fn end(&self) {
+        // Deadline first, so `suppressed` never sees a gap between the two stores.
+        *self.until.lock() = Some(Instant::now() + self.tail);
+        self.speaking.store(false, Ordering::SeqCst);
+    }
+
+    /// True while our own audio may still be reaching the microphone.
+    pub fn suppressed(&self) -> bool {
+        self.speaking.load(Ordering::SeqCst) || self.until.lock().is_some_and(|t| Instant::now() < t)
+    }
+}
+
+/// Play through our own speakers with the input gated off until the sound has died away.
+///
+/// Every path that makes a noise during a session has to go through here. Anything that does
+/// not will be transcribed, translated and — if it came from the call side — spoken back.
+pub fn play_gated(gate: &EchoGate, player: &Player, pcm: &[f32], rate: u32) {
+    gate.begin();
+    player.play(pcm, rate);
+    // Drain-driven rather than a computed sleep, so the gate tracks real playback.
+    while player.is_playing() {
+        thread::sleep(Duration::from_millis(25));
+    }
+    gate.end();
+}
+
 /// Optional audio output for spoken translations (absent in offline runs).
 ///
 /// Synthesis and playback happen on their own thread: the ML thread must never block on
@@ -291,11 +359,12 @@ impl Voice {
         cfg: SessionConfig,
         player: Arc<Player>,
         mixer: Sender<MixerCommand>,
+        gate: Arc<EchoGate>,
     ) -> Result<Self> {
         let (tx, rx) = bounded::<(String, String)>(8);
         thread::Builder::new().name("learnlive-voice".into()).spawn(move || {
             for (lang, text) in rx {
-                speak(&engines, &cfg, &player, &mixer, &lang, &text);
+                speak(&engines, &cfg, &player, &mixer, &gate, &lang, &text);
             }
         })?;
         Ok(Self(tx))
@@ -570,6 +639,7 @@ pub fn start(
     let loaded = engines.load(&cfg)?;
     let mixer = Mixer::start(&cfg.sources)?;
     let player = Arc::new(Player::open()?);
+    let gate = Arc::new(EchoGate::default());
     let running = Arc::new(AtomicBool::new(true));
     let mut registry = SpeakerRegistry::new(512);
     if db.remember_voices() {
@@ -586,6 +656,7 @@ pub fn start(
         let sink = sink.clone();
         let model_dir = engines.model_dir.clone();
         let frames = mixer.frames.clone();
+        let gate = gate.clone();
         thread::Builder::new().name("learnlive-vad".into()).spawn(move || {
             let mut seg = match Segmenter::new(&model_dir) {
                 Ok(s) => s,
@@ -597,16 +668,25 @@ pub fn start(
             let mut votes = (0u32, 0u32);
             let mut last_meter = Instant::now();
             let mut speaking = false;
+            let silence = vec![0.0f32; FRAME_SAMPLES];
             while running.load(Ordering::SeqCst) {
                 let Ok(MixFrame { mix, rms, dominant }) = frames.recv_timeout(Duration::from_millis(100)) else {
                     continue;
                 };
-                match dominant {
-                    Some(SourceRole::Local) => votes.0 += 1,
-                    Some(SourceRole::Remote) => votes.1 += 1,
-                    None => {}
+                // While our own audio is playing — and for a moment after, see `EchoGate` —
+                // everything arriving is that audio coming back round through the loopback and
+                // the microphone. Feed the VAD silence rather than skipping the frame, so the
+                // utterance timeline stays lined up with the wall clock across the gap.
+                let deaf = gate.suppressed();
+                if !deaf {
+                    match dominant {
+                        Some(SourceRole::Local) => votes.0 += 1,
+                        Some(SourceRole::Remote) => votes.1 += 1,
+                        None => {}
+                    }
                 }
-                match seg.push(&mix) {
+                let heard = if deaf { &silence[..mix.len().min(FRAME_SAMPLES)] } else { &mix[..] };
+                match seg.push(heard) {
                     Ok((sp, Some(utt))) => {
                         speaking = sp;
                         let role = if votes.0 > votes.1 { SourceRole::Local } else { SourceRole::Remote };
@@ -630,7 +710,7 @@ pub fn start(
     {
         let running = running.clone();
         let voice = if cfg.speak_translations {
-            Some(Voice::spawn(loaded.clone(), cfg.clone(), player.clone(), mixer.commands.clone())?)
+            Some(Voice::spawn(loaded.clone(), cfg.clone(), player.clone(), mixer.commands.clone(), gate.clone())?)
         } else {
             None
         };
@@ -652,7 +732,7 @@ pub fn start(
     }
 
     info!("session started: learning={} native={} sources={}", cfg.learning, cfg.native, cfg.sources.len());
-    Ok(SessionHandle { running, mixer_cmd: mixer.commands.clone(), speakers, player, cfg, meeting_id })
+    Ok(SessionHandle { running, mixer_cmd: mixer.commands.clone(), speakers, player, gate, cfg, meeting_id })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -727,6 +807,7 @@ pub fn speak(
     cfg: &SessionConfig,
     player: &Player,
     mixer: &Sender<MixerCommand>,
+    gate: &EchoGate,
     lang: &str,
     text: &str,
 ) {
@@ -735,11 +816,7 @@ pub fn speak(
         Ok((pcm, _)) if pcm.is_empty() => warn!("tts: produced no audio for {lang}"),
         Ok((pcm, rate)) => {
             let _ = mixer.send(MixerCommand::Duck(1.0 - cfg.duck_amount));
-            player.play(&pcm, rate);
-            // Drain-driven rather than a computed sleep, so ducking tracks real playback.
-            while player.is_playing() {
-                thread::sleep(Duration::from_millis(25));
-            }
+            play_gated(gate, player, &pcm, rate);
             let _ = mixer.send(MixerCommand::Duck(1.0));
         }
         Err(e) => warn!("tts: {e}"),
@@ -813,7 +890,6 @@ mod tests {
             Ok(("ru".into(), self.0.to_string()))
         }
     }
-
     /// Fake ASR reading down a script, one entry per call, so a single test can interleave
     /// real speech with the sound events Whisper emits for coughs and static.
     struct ScriptedAsr(Mutex<std::collections::VecDeque<&'static str>>);
@@ -985,6 +1061,29 @@ mod tests {
         assert_eq!(sink.final_only()[0].source_text, "я читаю книгу дома.");
     }
 
+    /// The gate has to stay shut after playback stops. Audio captured while we were talking is
+    /// still working its way through the capture buffers, and it is the tail of our own voice
+    /// leaking past the gate that closes the loop.
+    #[test]
+    fn the_echo_gate_outlasts_playback() {
+        let gate = EchoGate::with_tail(Duration::from_millis(120));
+        assert!(!gate.suppressed(), "nothing is playing");
+        gate.begin();
+        assert!(gate.suppressed(), "our own voice is audible");
+        gate.end();
+        assert!(gate.suppressed(), "the tail has not run out yet");
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(!gate.suppressed(), "the tail should have expired");
+    }
+
+    #[test]
+    fn punctuation_heuristic() {
+        assert!(looks_finished("Готово."));
+        assert!(looks_finished("Правда?"));
+        assert!(!looks_finished("и потом..."));
+        assert!(!looks_finished("а ещё"));
+    }
+
     #[test]
     fn sound_events_are_stripped_whatever_language_whisper_wrote_them_in() {
         for annotation in ["(Кашель)", "(coughing)", "(статика)", "[static]", "{noise}", "（音楽）", "*sighs*", "♪♪♪"]
@@ -1000,8 +1099,8 @@ mod tests {
     }
 
     /// A cough or a burst of static clears the VAD like speech does, and Whisper labels it
-    /// "(Кашель)" / "(static)". None of that is a thing anybody said, and since its embedding
-    /// matches no real voice it must not reach the speaker registry either.
+    /// "(Кашель)" / "(static)". It must not reach the transcript, and — since its embedding
+    /// matches no real voice — it must not reach the speaker registry either.
     #[test]
     fn a_sound_event_is_neither_transcript_nor_speaker() {
         for heard in ["(Кашель)", "(coughing)", "(статика)", "[static]", "♪♪♪"] {
@@ -1024,26 +1123,6 @@ mod tests {
             assert!(registry.lock().centroids().is_empty(), "{heard:?} created a speaker");
             assert_eq!(asr.1.load(Ordering::SeqCst), 1, "{heard:?} was transcribed twice");
         }
-    }
-
-    /// An aside Whisper tacks onto real speech loses the aside, not the speech.
-    #[test]
-    fn speech_alongside_an_aside_is_kept() {
-        let engines = Loaded {
-            asr: Arc::new(SaysAsr("(cough) Я читаю книгу.", Default::default())),
-            translator: Arc::new(FakeMt),
-            grammar: Some(Arc::new(NoGrammar)),
-            speaker: Some(Arc::new(FakeEmb)),
-            tts: Default::default(),
-        };
-        let sink = Arc::new(CollectSink::default());
-        let mut s =
-            Sentencer::new(engines, cfg(), Arc::new(Mutex::new(SpeakerRegistry::new(512))), sink.clone(), None, None);
-        s.push(Job { utt: utt(2, 0, 1.0), role: SourceRole::Remote }).unwrap();
-        s.finalise().unwrap();
-        let f = sink.final_only();
-        assert_eq!(f[0].source_text, "Я читаю книгу.");
-        assert_eq!(f[0].speaker.label, "Speaker 1");
     }
 
     /// The reported symptom: coughs and static between sentences each minted a new speaker, so
@@ -1077,11 +1156,23 @@ mod tests {
         assert_eq!(registry.lock().centroids().len(), 1, "one voice was in the room");
     }
 
+    /// An aside Whisper tacks onto real speech loses the aside, not the speech.
     #[test]
-    fn punctuation_heuristic() {
-        assert!(looks_finished("Готово."));
-        assert!(looks_finished("Правда?"));
-        assert!(!looks_finished("и потом..."));
-        assert!(!looks_finished("а ещё"));
+    fn speech_alongside_an_aside_is_kept() {
+        let engines = Loaded {
+            asr: Arc::new(SaysAsr("(cough) Я читаю книгу.", Default::default())),
+            translator: Arc::new(FakeMt),
+            grammar: Some(Arc::new(NoGrammar)),
+            speaker: Some(Arc::new(FakeEmb)),
+            tts: Default::default(),
+        };
+        let sink = Arc::new(CollectSink::default());
+        let mut s =
+            Sentencer::new(engines, cfg(), Arc::new(Mutex::new(SpeakerRegistry::new(512))), sink.clone(), None, None);
+        s.push(Job { utt: utt(2, 0, 1.0), role: SourceRole::Remote }).unwrap();
+        s.finalise().unwrap();
+        let f = sink.final_only();
+        assert_eq!(f[0].source_text, "Я читаю книгу.");
+        assert_eq!(f[0].speaker.label, "Speaker 1");
     }
 }
