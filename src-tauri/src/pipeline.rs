@@ -17,7 +17,7 @@ use parking_lot::Mutex;
 use tauri::{AppHandle, Emitter};
 
 use crate::audio::{MixFrame, Mixer, MixerCommand, Player};
-use crate::engine::diarize::SpeakerRegistry;
+use crate::engine::diarize::{cosine, SpeakerRegistry};
 use crate::engine::vad::{Segmenter, Utterance};
 use crate::engine::{Engines, Loaded};
 use crate::types::{Levels, Segment, SessionConfig, SourceRole, SpeakerRef};
@@ -165,7 +165,10 @@ struct Built {
 
 struct Open {
     id: String,
-    speaker: SpeakerRef,
+    /// Resolved on the first build that produces words — see [`Voiceprint`]. `None` until then.
+    speaker: Option<SpeakerRef>,
+    /// Who we think is talking, before ASR has said whether this was talking at all.
+    voice: Voiceprint,
     role: SourceRole,
     pcm: Vec<f32>,
     started_ms: u64,
@@ -178,6 +181,55 @@ struct Open {
     /// was nothing worth showing — cached like any other verdict, so a cough is not
     /// transcribed a second time on its way out.
     cached: Option<(usize, Option<Built>)>,
+}
+
+impl Open {
+    /// Whether `v` is the voice this sentence is already carrying. Once the sentence has been
+    /// committed to the registry we can compare speaker ids; before that either side may still
+    /// be unregistered, so fall back to comparing the two embeddings against each other.
+    fn is_same_voice(&self, v: &Voiceprint, threshold: f32) -> bool {
+        match &self.speaker {
+            Some(s) => v.id() == Some(s.id),
+            None => match (self.voice.id(), v.id()) {
+                (Some(a), Some(b)) => a == b,
+                (None, None) => self.voice.sounds_like(v, threshold),
+                _ => false,
+            },
+        }
+    }
+}
+
+/// Who an utterance belongs to, before ASR has had its say.
+///
+/// Resolution is deferred on purpose. Coughs, door slams and bursts of line noise all clear the
+/// VAD, all get embedded, and none of them match a real voice — so identifying a speaker the
+/// moment an utterance arrived minted a new "Speaker N" every time somebody cleared their
+/// throat. `Sentencer` carries this instead, and commits it only once a sentence has words in
+/// it.
+enum Voiceprint {
+    /// Identity known without a model: the local mic ("You"), or diarization switched off.
+    Fixed(SpeakerRef),
+    /// An embedded voice, plus the registered speaker it matched if there was one.
+    Embedded { emb: Vec<f32>, matched: Option<SpeakerRef> },
+}
+
+impl Voiceprint {
+    /// The speaker id this already resolves to. `None` means the registry has never heard it,
+    /// which covers both a person who has not spoken yet and a cough.
+    fn id(&self) -> Option<u32> {
+        match self {
+            Voiceprint::Fixed(s) => Some(s.id),
+            Voiceprint::Embedded { matched, .. } => matched.as_ref().map(|s| s.id),
+        }
+    }
+
+    /// Whether two voices the registry does not know sound like the same person.
+    fn sounds_like(&self, other: &Voiceprint, threshold: f32) -> bool {
+        match (self, other) {
+            (Voiceprint::Embedded { emb: a, .. }, Voiceprint::Embedded { emb: b, .. }) => cosine(a, b) >= threshold,
+            _ => false,
+        }
+    }
 }
 
 fn now_ms() -> u64 {
@@ -305,21 +357,29 @@ impl Sentencer {
         self
     }
 
-    pub fn push(&mut self, job: Job) -> Result<()> {
-        let speaker: SpeakerRef = if job.role == SourceRole::Local {
-            self.speakers.lock().local()
-        } else if let Some(emb) = &self.engines.speaker {
-            let e = emb.embed(&job.utt.pcm)?;
-            self.speakers.lock().identify(&e)
-        } else {
-            SpeakerRef { id: 1, label: "Speaker".into(), confidence: 0.0 }
+    /// Embed the utterance and ask the registry whether it already knows the voice. Nothing is
+    /// written to the registry here — see [`Voiceprint`] for why that has to wait.
+    fn voiceprint(&self, job: &Job) -> Result<Voiceprint> {
+        if job.role == SourceRole::Local {
+            return Ok(Voiceprint::Fixed(self.speakers.lock().local()));
+        }
+        let Some(embedder) = &self.engines.speaker else {
+            return Ok(Voiceprint::Fixed(SpeakerRef { id: 1, label: "Speaker".into(), confidence: 0.0 }));
         };
+        let emb = embedder.embed(&job.utt.pcm)?;
+        let matched = self.speakers.lock().matching(&emb);
+        Ok(Voiceprint::Embedded { emb, matched })
+    }
+
+    pub fn push(&mut self, job: Job) -> Result<()> {
+        let voice = self.voiceprint(&job)?;
+        let threshold = self.speakers.lock().threshold();
 
         let continues = self
             .open
             .as_ref()
             .map(|o| {
-                o.speaker.id == speaker.id
+                o.is_same_voice(&voice, threshold)
                     && job.utt.started_ms.saturating_sub(o.ended_ms) <= self.opts.continue_gap_ms
                     && !looks_finished(&o.last_text)
                     && job.utt.ended_ms.saturating_sub(o.started_ms) <= self.opts.max_sentence_ms
@@ -330,7 +390,8 @@ impl Sentencer {
             self.finalise()?;
             self.open = Some(Open {
                 id: uuid::Uuid::new_v4().to_string(),
-                speaker,
+                speaker: None,
+                voice,
                 role: job.role,
                 pcm: vec![],
                 started_ms: job.utt.started_ms,
@@ -341,8 +402,17 @@ impl Sentencer {
                 last_touch: (self.now)(),
                 cached: None,
             });
-        } else if let Some(o) = self.open.as_mut() {
-            o.revision += 1;
+        } else {
+            // This utterance is joining a sentence that already has words in it, so its voice is
+            // a real one and may sharpen the speaker's centroid.
+            let id = {
+                let o = self.open.as_mut().expect("open");
+                o.revision += 1;
+                o.speaker.as_ref().map(|s| s.id)
+            };
+            if let (Some(id), Voiceprint::Embedded { emb, .. }) = (id, &voice) {
+                self.speakers.lock().reinforce(id, emb);
+            }
         }
 
         let o = self.open.as_mut().expect("open");
@@ -406,6 +476,9 @@ impl Sentencer {
             return Ok(None);
         }
 
+        // Words came back, so a person said them — only now may this voice enter the registry.
+        let speaker = self.commit_speaker();
+
         let o = self.open.as_ref().expect("open");
         let b = o.cached.as_ref().and_then(|(_, b)| b.as_ref()).expect("just checked");
         let clip_path = match (&self.clip_dir, is_final) {
@@ -415,7 +488,7 @@ impl Sentencer {
 
         Ok(Some(Segment {
             id: o.id.clone(),
-            speaker: o.speaker.clone(),
+            speaker,
             role: o.role,
             started_ms: o.started_ms,
             ended_ms: o.ended_ms,
@@ -431,6 +504,30 @@ impl Sentencer {
         }))
     }
 
+    /// Resolve the open sentence's voice against the registry, once. Only ever called after
+    /// ASR has confirmed the sentence has words in it, so nothing non-speech gets this far.
+    fn commit_speaker(&mut self) -> SpeakerRef {
+        let o = self.open.as_ref().expect("open");
+        if let Some(s) = &o.speaker {
+            return s.clone();
+        }
+        let speaker = match &o.voice {
+            Voiceprint::Fixed(s) => s.clone(),
+            Voiceprint::Embedded { emb, matched } => {
+                let mut registry = self.speakers.lock();
+                match matched {
+                    Some(s) => {
+                        registry.reinforce(s.id, emb);
+                        s.clone()
+                    }
+                    None => registry.enroll(emb),
+                }
+            }
+        };
+        self.open.as_mut().expect("open").speaker = Some(speaker.clone());
+        speaker
+    }
+
     /// ASR + translation + tagging over the open sentence's audio. The expensive part.
     fn compute(&self) -> Result<Option<Built>> {
         let o = self.open.as_ref().expect("open");
@@ -438,7 +535,7 @@ impl Sentencer {
         let (src_lang, heard) = self.engines.asr.transcribe(&o.pcm, &cfg.source_lang)?;
         // Whisper narrates what it cannot transcribe: a cough, a door slam or a burst of line
         // noise comes back as "(Кашель)", "(coughing)" or "[static]". Nobody said those, so they
-        // must not be translated, shown, or allowed to reach the transcript.
+        // must not be translated, shown, or — by way of `build` — allowed to register a speaker.
         let text = strip_non_speech(&heard);
         if text.chars().count() < self.opts.min_chars || !text.chars().any(char::is_alphanumeric) {
             return Ok(None);
@@ -717,6 +814,15 @@ mod tests {
         }
     }
 
+    /// Fake ASR reading down a script, one entry per call, so a single test can interleave
+    /// real speech with the sound events Whisper emits for coughs and static.
+    struct ScriptedAsr(Mutex<std::collections::VecDeque<&'static str>>);
+    impl Transcriber for ScriptedAsr {
+        fn transcribe(&self, _: &[f32], _: &str) -> Result<(String, String)> {
+            Ok(("ru".into(), self.0.lock().pop_front().unwrap_or_default().to_string()))
+        }
+    }
+
     /// Speaker = sign of the first sample. Two "voices" for tests.
     struct FakeEmb;
     impl SpeakerEmbedder for FakeEmb {
@@ -725,6 +831,17 @@ mod tests {
             let mut v = vec![0.0; 512];
             v[0] = s;
             v[1] = 0.1;
+            Ok(v)
+        }
+    }
+
+    /// Every utterance embeds to its own axis, so a test can make each cough sound like
+    /// nobody the registry has ever heard — which is what a cough actually does.
+    struct DistinctEmb;
+    impl SpeakerEmbedder for DistinctEmb {
+        fn embed(&self, pcm: &[f32]) -> Result<Vec<f32>> {
+            let mut v = vec![0.0; 512];
+            v[(pcm.first().copied().unwrap_or(0.0) as usize).min(511)] = 1.0;
             Ok(v)
         }
     }
@@ -883,9 +1000,10 @@ mod tests {
     }
 
     /// A cough or a burst of static clears the VAD like speech does, and Whisper labels it
-    /// "(Кашель)" / "(static)". None of that is a thing anybody said.
+    /// "(Кашель)" / "(static)". None of that is a thing anybody said, and since its embedding
+    /// matches no real voice it must not reach the speaker registry either.
     #[test]
-    fn a_sound_event_never_reaches_the_transcript() {
+    fn a_sound_event_is_neither_transcript_nor_speaker() {
         for heard in ["(Кашель)", "(coughing)", "(статика)", "[static]", "♪♪♪"] {
             let asr = Arc::new(SaysAsr(heard, Default::default()));
             let engines = Loaded {
@@ -895,20 +1013,15 @@ mod tests {
                 speaker: Some(Arc::new(FakeEmb)),
                 tts: Default::default(),
             };
+            let registry = Arc::new(Mutex::new(SpeakerRegistry::new(512)));
             let sink = Arc::new(CollectSink::default());
-            let mut s = Sentencer::new(
-                engines,
-                cfg(),
-                Arc::new(Mutex::new(SpeakerRegistry::new(512))),
-                sink.clone(),
-                None,
-                None,
-            );
+            let mut s = Sentencer::new(engines, cfg(), registry.clone(), sink.clone(), None, None);
 
             s.push(Job { utt: utt(2, 0, 1.0), role: SourceRole::Remote }).unwrap();
             s.finalise().unwrap();
 
             assert!(sink.all.lock().is_empty(), "{heard:?} was shown as a transcript");
+            assert!(registry.lock().centroids().is_empty(), "{heard:?} created a speaker");
             assert_eq!(asr.1.load(Ordering::SeqCst), 1, "{heard:?} was transcribed twice");
         }
     }
@@ -928,7 +1041,40 @@ mod tests {
             Sentencer::new(engines, cfg(), Arc::new(Mutex::new(SpeakerRegistry::new(512))), sink.clone(), None, None);
         s.push(Job { utt: utt(2, 0, 1.0), role: SourceRole::Remote }).unwrap();
         s.finalise().unwrap();
-        assert_eq!(sink.final_only()[0].source_text, "Я читаю книгу.");
+        let f = sink.final_only();
+        assert_eq!(f[0].source_text, "Я читаю книгу.");
+        assert_eq!(f[0].speaker.label, "Speaker 1");
+    }
+
+    /// The reported symptom: coughs and static between sentences each minted a new speaker, so
+    /// the second thing one person said came back as "Speaker 4".
+    #[test]
+    fn sound_events_do_not_advance_the_speaker_counter() {
+        let script = ["Привет.", "(Кашель)", "(статика)", "Как дела?"].into_iter().collect();
+        let engines = Loaded {
+            asr: Arc::new(ScriptedAsr(Mutex::new(script))),
+            translator: Arc::new(FakeMt),
+            grammar: Some(Arc::new(NoGrammar)),
+            speaker: Some(Arc::new(DistinctEmb)),
+            tts: Default::default(),
+        };
+        let registry = Arc::new(Mutex::new(SpeakerRegistry::new(512)));
+        let sink = Arc::new(CollectSink::default());
+        let mut s = Sentencer::new(engines, cfg(), registry.clone(), sink.clone(), None, None);
+
+        // One person, with a cough and a burst of static in between — each its own "voice".
+        for (i, voice) in [1.0, 2.0, 3.0, 1.0].into_iter().enumerate() {
+            s.push(Job { utt: utt(2, i as u64 * 5_000, voice), role: SourceRole::Remote }).unwrap();
+        }
+        s.finalise().unwrap();
+
+        let f = sink.final_only();
+        assert_eq!(f.len(), 2, "only the two spoken sentences should survive");
+        assert_eq!(f[0].source_text, "Привет.");
+        assert_eq!(f[1].source_text, "Как дела?");
+        assert_eq!(f[0].speaker.id, f[1].speaker.id, "the same person said both");
+        assert_eq!(f[1].speaker.label, "Speaker 1", "the sound events took speaker numbers");
+        assert_eq!(registry.lock().centroids().len(), 1, "one voice was in the room");
     }
 
     #[test]

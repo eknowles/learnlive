@@ -91,26 +91,38 @@ impl SpeakerRegistry {
         SpeakerRef { id: self.local_id, label: self.label_of(self.local_id), confidence: 1.0 }
     }
 
-    /// Match or create. Returns the speaker plus similarity to its centroid.
-    pub fn identify(&mut self, embedding: &[f32]) -> SpeakerRef {
-        if let Some(name) = self.manager.search(embedding, self.threshold) {
-            let id: u32 = name.parse().unwrap_or(0);
-            // Refine centroid so the speaker model improves over the call.
-            let _ = self.manager.add(name.clone(), &mut embedding.to_vec());
-            self.fold(id, embedding);
-            let known = self.known.contains_key(&id);
-            return SpeakerRef {
-                id,
-                label: self.label_of(id),
-                confidence: if known { 0.9 } else { self.threshold + 0.1 },
-            };
-        }
+    /// Cosine similarity two utterances need before they count as the same voice.
+    pub fn threshold(&self) -> f32 {
+        self.threshold
+    }
+
+    /// The speaker this embedding belongs to, or `None` for a voice we have not heard before.
+    ///
+    /// Deliberately read-only. Registering a voice is [`enroll`](Self::enroll), and the two are
+    /// kept apart so the caller can wait until ASR has confirmed the audio contained words:
+    /// everything that clears the VAD gets embedded — coughs, keyboard clatter, line noise —
+    /// and none of it matches a real person, so matching and registering in one step minted a
+    /// fresh "Speaker N" for every throat-clear.
+    pub fn matching(&mut self, embedding: &[f32]) -> Option<SpeakerRef> {
+        let id: u32 = self.manager.search(embedding, self.threshold)?.parse().unwrap_or(0);
+        let known = self.known.contains_key(&id);
+        Some(SpeakerRef { id, label: self.label_of(id), confidence: if known { 0.9 } else { self.threshold + 0.1 } })
+    }
+
+    /// Register a voice that matched nobody, and return the speaker it became.
+    pub fn enroll(&mut self, embedding: &[f32]) -> SpeakerRef {
         let id = self.next_id;
         self.next_id += 1;
         let _ = self.manager.add(id.to_string(), &mut embedding.to_vec());
         self.fold(id, embedding);
         self.labels.push((id, format!("Speaker {id}")));
         SpeakerRef { id, label: self.label_of(id), confidence: 0.5 }
+    }
+
+    /// Fold another utterance into a known speaker, so our model of them sharpens over the call.
+    pub fn reinforce(&mut self, id: u32, embedding: &[f32]) {
+        let _ = self.manager.add(id.to_string(), &mut embedding.to_vec());
+        self.fold(id, embedding);
     }
 
     pub fn rename(&mut self, id: u32, label: String) {
@@ -122,4 +134,16 @@ impl SpeakerRegistry {
     fn label_of(&self, id: u32) -> String {
         self.labels.iter().find(|(i, _)| *i == id).map(|l| l.1.clone()).unwrap_or_else(|| format!("Speaker {id}"))
     }
+}
+
+/// Cosine similarity, for comparing two voices the registry has not seen yet: until one of them
+/// is enrolled there is no centroid to search against.
+pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    let (mut dot, mut na, mut nb) = (0.0f32, 0.0f32, 0.0f32);
+    for (x, y) in a.iter().zip(b) {
+        dot += x * y;
+        na += x * x;
+        nb += y * y;
+    }
+    dot / (na.sqrt() * nb.sqrt()).max(f32::EPSILON)
 }
