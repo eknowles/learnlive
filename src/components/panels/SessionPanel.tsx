@@ -47,6 +47,16 @@ export default function SessionPanel({ cfg, setCfg, devices, languages, locked }
             ))}
           </select>
         </Row>
+        <Row label="People are speaking" caption="Leave auto to detect from the audio.">
+          <select value={cfg.source_lang} disabled={locked} onChange={e => set('source_lang', e.target.value)}>
+            <option value="auto">Auto-detect</option>
+            {languages.map(l => (
+              <option key={l.code} value={l.code}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </Row>
       </Group>
 
       <Group
