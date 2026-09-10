@@ -106,3 +106,25 @@ h2 { font-size: 12px; font-weight: 600; color: var(--quiet); margin: 18px 0 8px;
 .pause::before, .pause::after { content: ''; display: inline-block; width: 40px; border-top: 1px dashed var(--rule); vertical-align: middle; margin: 0 10px; }
 .jump { position: sticky; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); border-color: transparent; padding: 8px 14px; border-radius: 999px; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
 @media (prefers-reduced-motion: reduce) { .w.changed { animation: none; background: color-mix(in srgb, var(--pos) 25%, transparent); } }
+
+/* views / meeting / history */
+.views { display: flex; gap: 4px; margin-bottom: 14px; }
+.views button { flex: 1; }
+.views button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: transparent; }
+.small { font-size: 12px; }
+.meeting .linked { margin: 0; line-height: 1.4; }
+.meeting select { margin-bottom: 6px; }
+.speakers select { flex: 1; padding: 4px 6px; font-size: 13px; }
+.history { max-width: 72ch; }
+.history-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+.history-head .brand { margin: 0; }
+.search { flex: 1; min-width: 260px; font-size: 14px; padding: 8px 10px; }
+.meetings, .hits { list-style: none; padding: 0; }
+.meetings li { padding: 12px 0; border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 2px; }
+.meetings .title { font-family: var(--serif); font-size: 18px; text-decoration: none; text-align: left; }
+.meetings .title:hover { text-decoration: underline; }
+.hits li { padding: 12px 0; border-top: 1px solid var(--rule); }
+.hits .study.small { font-size: 17px; margin-top: 4px; }
+.danger { color: #B5452B; margin-left: auto; }
+.remember { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--rule); align-items: flex-start; flex-wrap: wrap; }
+.remember .small { flex-basis: 100%; margin-left: 24px; }

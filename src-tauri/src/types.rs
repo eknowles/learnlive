@@ -135,3 +135,50 @@ pub struct Levels {
     pub mix: f32,
     pub speech_active: bool,
 }
+
+// ---- calendar & history ---------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Attendee { pub name: String, pub email: String }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CalendarEvent {
+    pub id: String,
+    pub title: String,
+    pub start: i64,        // unix seconds
+    pub end: i64,
+    pub attendees: Vec<Attendee>,
+    pub url: Option<String>,
+    pub calendar: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MeetingSummary {
+    pub id: i64,
+    pub title: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub learning: String,
+    pub native: String,
+    pub calendar_event_id: Option<String>,
+    pub participants: Vec<ParticipantRef>,
+    pub sentence_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ParticipantRef {
+    pub id: i64,
+    pub name: String,
+    pub email: Option<String>,
+    /// Speaker id in this meeting's transcript (None = attended but never spoke / unassigned).
+    pub speaker_id: Option<u32>,
+    pub has_voiceprint: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SearchHit {
+    pub meeting_id: i64,
+    pub meeting_title: String,
+    pub started_at: i64,
+    pub segment: Segment,
+}

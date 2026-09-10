@@ -14,6 +14,15 @@ Join a Google Meet / Zoom / Teams call, press **Start listening**, and every utt
 
 Works in either direction: speech in your learning language is translated *to* your native language so you can follow; anything else (including what you say) is translated *into* the learning language so you see how you could have said it.
 
+## Meetings, people and history
+
+- **Calendar link.** On Start, LearnLive looks at your calendar (macOS EventKit, read‑only, permission prompt on first use) for a meeting in progress or about to start and attaches the session to it. Attach later from the Meeting panel if it guessed wrong or you started early.
+- **Speakers → people.** With an invite linked, each detected speaker gets a dropdown of attendees. Pick "Anna" and every line from that voice is relabelled, now and in history.
+- **Remembered voices** (off by default, History → checkbox). When on, the voice of anyone you've *named* is averaged into a local voiceprint and they're recognised from their first sentence next time. Stored only in the local SQLite file; turning it off deletes all of them; per‑person forget is a command away.
+- **History.** Every finalised sentence is written to `learnlive.sqlite` in the app data dir, with FTS5 search across all meetings in both languages ("книгу", "book", prefix*). Open any meeting and you get the same reading surface with hover cards and clip replay.
+
+Tauri has no calendar plugin; `src-tauri/src/calendar.rs` is a small `objc2` bridge to EventKit and is macOS‑only for now (Windows/Linux would need the Google Calendar API).
+
 ## Languages
 
 English, Russian, Ukrainian, Spanish, French, German, Italian, Portuguese, Polish, Turkish, Arabic, Chinese, Japanese, Korean, Hindi, Dutch. Any pair, any direction. Adding one is a row in `src-tauri/src/engine/languages.rs` (+ a Piper voice in `models.rs` if you want it spoken).
@@ -67,11 +76,15 @@ src/                       React UI (TypeScript)
   components/Setup.tsx       languages, devices, model download, start/stop
   components/Mixer.tsx       live per-source gain, mute, meters
   components/Speakers.tsx    detected speakers, rename
+  components/Meeting.tsx     pick / show the linked calendar event
+  components/History.tsx     past meetings, open, search, remember-voices toggle
   components/Transcript.tsx  the reading surface
   components/Word.tsx        hover card + pronunciation
   lib/api.ts                 typed wrapper over Tauri commands/events
 src-tauri/src/
-  audio/                     capture, mixer, resample, playback
+  audio/                     capture, mixer, resample, playback, file_source
+  calendar.rs                EventKit bridge (macOS) — no Tauri plugin exists for calendars
+  db.rs                      SQLite: meetings, participants, segments + FTS5, voiceprints
   engine/                    asr, diarize, translate, grammar, tts, vad, languages
   pipeline.rs                session orchestration (audio thread + ML thread)
   models.rs                  manifest + downloader

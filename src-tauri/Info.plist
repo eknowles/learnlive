@@ -4,5 +4,9 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>LearnLive listens to your call audio and microphone to transcribe and translate it locally. Nothing leaves your machine.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>LearnLive reads your calendar to link a session to the meeting it happened in and to offer attendee names when labelling speakers. Nothing is written to your calendar.</string>
+  <key>NSCalendarsUsageDescription</key>
+  <string>LearnLive reads your calendar to link sessions to meetings.</string>
 </dict>
 </plist>

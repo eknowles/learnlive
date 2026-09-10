@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './lib/api'
-import type { AudioDevice, Language, Levels, ModelProgress, ModelStatus, Segment, SessionConfig } from './lib/types'
+import type { AudioDevice, CalendarEvent, Language, Levels, MeetingSummary, ModelProgress, ModelStatus, Segment, SessionConfig } from './lib/types'
 import Setup from './components/Setup'
 import Mixer from './components/Mixer'
 import Speakers from './components/Speakers'
+import Meeting from './components/Meeting'
+import History from './components/History'
 import Transcript from './components/Transcript'
 import './styles.css'
 
@@ -25,6 +27,9 @@ export default function App() {
   const [levels, setLevels] = useState<Levels | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [names, setNames] = useState<Record<number, string>>({})
+  const [view, setView] = useState<'live' | 'history'>('live')
+  const [pendingEvent, setPendingEvent] = useState<CalendarEvent | null>(null)
+  const [meeting, setMeeting] = useState<MeetingSummary | null>(null)
   const unlisten = useRef<(() => void)[]>([])
 
   useEffect(() => {
@@ -55,26 +60,36 @@ export default function App() {
     try {
       if (models.some(m => !m.present)) { setPhase('downloading'); await api.prepareModels(cfg) }
       setPhase('starting')
-      await api.start(cfg)
+      const id = await api.start(cfg, pendingEvent)
+      const all = await api.listMeetings(5)
+      setMeeting(all.find(m => m.id === id) ?? null)
+      setSegments([]); setNames({})
       setPhase('live')
     } catch (e) { setError(String(e)); setPhase('setup') }
   }
-  const stop = async () => { await api.stop(); setPhase('setup') }
+  const stop = async () => { await api.stop(); setPhase('setup'); setPendingEvent(null) }
 
-  const rename = (id: number, label: string) => { setNames(n => ({ ...n, [id]: label })); api.renameSpeaker(id, label) }
+  const rename = (id: number, label: string) => setNames(n => ({ ...n, [id]: label }))
   const shown = segments.map(s => ({ ...s, speaker: { ...s.speaker, label: names[s.speaker.id] ?? s.speaker.label } }))
 
   return (
     <div className="shell">
       <aside className="rail">
         <h1 className="brand">LearnLive</h1>
+        <nav className="views" aria-label="View">
+          <button aria-pressed={view === 'live'} onClick={() => setView('live')}>Live</button>
+          <button aria-pressed={view === 'history'} onClick={() => setView('history')}>History</button>
+        </nav>
         <Setup cfg={cfg} setCfg={setCfg} devices={devices} languages={languages} models={models} progress={progress} phase={phase} onStart={start} onStop={stop} />
+        <Meeting phase={phase} meeting={meeting} pending={pendingEvent} onPending={setPendingEvent} onLinked={setMeeting} />
         {phase === 'live' && <Mixer cfg={cfg} setCfg={setCfg} devices={devices} levels={levels} />}
-        <Speakers segments={shown} onRename={rename} />
+        <Speakers segments={shown} meeting={meeting} onRename={rename} onMeeting={setMeeting} />
         {error && <p className="error" role="alert">{error}</p>}
       </aside>
       <main className="stage">
-        <Transcript segments={shown} learning={cfg.learning} live={phase === 'live'} speechActive={levels?.speech_active ?? false} />
+        {view === 'history'
+          ? <History />
+          : <Transcript segments={shown} learning={cfg.learning} live={phase === 'live'} speechActive={levels?.speech_active ?? false} />}
       </main>
     </div>
   )

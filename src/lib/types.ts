@@ -65,3 +65,12 @@ export interface Segment {
 export interface ModelStatus { id: string; kind: string; present: boolean; approx_mb: number }
 export interface ModelProgress { model: string; bytes: number; total: number | null; done: boolean }
 export interface Levels { per_source: [string, number][]; mix: number; speech_active: boolean }
+
+export interface Attendee { name: string; email: string }
+export interface CalendarEvent { id: string; title: string; start: number; end: number; attendees: Attendee[]; url: string | null; calendar: string }
+export interface ParticipantRef { id: number; name: string; email: string | null; speaker_id: number | null; has_voiceprint: boolean }
+export interface MeetingSummary {
+  id: number; title: string; started_at: number; ended_at: number | null; learning: string; native: string
+  calendar_event_id: string | null; participants: ParticipantRef[]; sentence_count: number
+}
+export interface SearchHit { meeting_id: number; meeting_title: string; started_at: number; segment: Segment }

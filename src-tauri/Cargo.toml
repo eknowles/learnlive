@@ -46,6 +46,17 @@ futures-util = "0.3"
 sha2 = "0.10"
 dirs = "5"
 uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Local history: SQLite with FTS5, bundled so there's no system dependency
+rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Calendar via EventKit (no Tauri plugin exists for it; the bridge is in src/calendar.rs)
+objc2 = "0.5"
+objc2-foundation = { version = "0.2", features = ["NSDate", "NSString", "NSArray", "NSURL", "NSError"] }
+objc2-event-kit = { version = "0.2", features = ["EKEventStore", "EKEvent", "EKCalendarItem", "EKParticipant", "EKTypes"] }
+block2 = "0.5"
 
 [[bin]]
 name = "learnlive"

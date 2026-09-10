@@ -47,6 +47,22 @@ pub struct CollectSink { pub all: Mutex<Vec<Segment>> }
 impl EventSink for CollectSink {
     fn segment(&self, s: &Segment) { self.all.lock().push(s.clone()); }
 }
+/// Fan-out to several sinks (UI + database).
+pub struct MultiSink(pub Vec<Arc<dyn EventSink>>);
+impl EventSink for MultiSink {
+    fn segment(&self, s: &Segment) { for k in &self.0 { k.segment(s); } }
+    fn levels(&self, l: &Levels) { for k in &self.0 { k.levels(l); } }
+    fn error(&self, m: &str) { for k in &self.0 { k.error(m); } }
+}
+
+/// Persists finalised sentences to the local history.
+pub struct DbSink { pub db: Arc<crate::db::Db>, pub meeting_id: i64 }
+impl EventSink for DbSink {
+    fn segment(&self, s: &Segment) {
+        if s.is_final { if let Err(e) = self.db.insert_segment(self.meeting_id, s) { error!("db: {e:#}"); } }
+    }
+}
+
 impl CollectSink {
     pub fn final_only(&self) -> Vec<Segment> {
         let all = self.all.lock();
@@ -67,6 +83,7 @@ pub struct SessionHandle {
     pub speakers: Arc<Mutex<SpeakerRegistry>>,
     pub player: Arc<Player>,
     pub cfg: SessionConfig,
+    pub meeting_id: i64,
 }
 
 impl SessionHandle {
@@ -216,15 +233,17 @@ impl Sentencer {
 // ---------------------------------------------------------------------------------------------
 // Live session
 
-pub fn start(app: AppHandle, engines: Arc<Engines>, cfg: SessionConfig, clip_dir: PathBuf) -> Result<SessionHandle> {
+pub fn start(app: AppHandle, engines: Arc<Engines>, db: Arc<crate::db::Db>, meeting_id: i64, cfg: SessionConfig, clip_dir: PathBuf) -> Result<SessionHandle> {
     engines.warm(&cfg)?;
     let mixer = Mixer::start(&cfg.sources)?;
     let player = Arc::new(Player::open()?);
     let running = Arc::new(AtomicBool::new(true));
-    let speakers = Arc::new(Mutex::new(SpeakerRegistry::new(512)));
+    let mut registry = SpeakerRegistry::new(512);
+    if db.remember_voices() { registry.preload(&db.voiceprints()?); }
+    let speakers = Arc::new(Mutex::new(registry));
     let (job_tx, job_rx) = bounded::<Job>(16);
     std::fs::create_dir_all(&clip_dir)?;
-    let sink: Arc<dyn EventSink> = Arc::new(app.clone());
+    let sink: Arc<dyn EventSink> = Arc::new(MultiSink(vec![Arc::new(app.clone()), Arc::new(DbSink { db, meeting_id })]));
 
     {
         let running = running.clone();
@@ -273,7 +292,7 @@ pub fn start(app: AppHandle, engines: Arc<Engines>, cfg: SessionConfig, clip_dir
     }
 
     info!("session started: learning={} native={} sources={}", cfg.learning, cfg.native, cfg.sources.len());
-    Ok(SessionHandle { running, mixer_cmd: mixer.commands.clone(), speakers, player, cfg })
+    Ok(SessionHandle { running, mixer_cmd: mixer.commands.clone(), speakers, player, cfg, meeting_id })
 }
 
 // ---------------------------------------------------------------------------------------------

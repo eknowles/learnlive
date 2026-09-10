@@ -5,7 +5,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::engine::languages::{Language, LANGUAGES};
 use crate::models;
-use crate::types::{AudioDevice, MixerSource, SessionConfig};
+use crate::types::{AudioDevice, CalendarEvent, MeetingSummary, MixerSource, SearchHit, Segment, SessionConfig};
 use crate::{pipeline, AppState};
 
 type CmdResult<T> = Result<T, String>;
@@ -51,24 +51,49 @@ pub async fn prepare_models(app: AppHandle, cfg: SessionConfig) -> CmdResult<()>
     Ok(())
 }
 
+/// Starts a session and a meeting row. Returns the meeting id so the UI can link/assign.
 #[tauri::command]
-pub async fn start_session(app: AppHandle, state: State<'_, AppState>, cfg: SessionConfig) -> CmdResult<()> {
+pub async fn start_session(app: AppHandle, state: State<'_, AppState>, cfg: SessionConfig, event: Option<CalendarEvent>) -> CmdResult<i64> {
     if cfg.sources.is_empty() { return Err("Pick at least one audio source".into()); }
-    if let Some(old) = state.session.lock().take() { old.stop(); }
+    if let Some(old) = state.session.lock().take() { finish(&state, old); }
     let clip_dir = app.path().app_cache_dir().map_err(err)?.join("clips");
-    let engines = state.engines.clone();
-    let app2 = app.clone();
-    // Engine warm-up can take seconds; keep the UI thread free.
-    let handle = tauri::async_runtime::spawn_blocking(move || pipeline::start(app2, engines, cfg, clip_dir))
+    let now = chrono::Utc::now().timestamp();
+    let title = event.as_ref().map(|e| e.title.clone()).unwrap_or_else(|| format!("Session {}", chrono::Local::now().format("%a %-d %b %H:%M")));
+    let meeting_id = state.db.start_meeting(&title, event.as_ref().map(|e| e.id.as_str()), &cfg, now).map_err(err)?;
+    if let Some(e) = &event {
+        let att: Vec<(String, Option<String>)> = e.attendees.iter().map(|a| (a.name.clone(), Some(a.email.clone()).filter(|s| !s.is_empty()))).collect();
+        state.db.link_event(meeting_id, &e.id, &e.title, &att).map_err(err)?;
+    }
+    let (engines, db, app2) = (state.engines.clone(), state.db.clone(), app.clone());
+    let handle = tauri::async_runtime::spawn_blocking(move || pipeline::start(app2, engines, db, meeting_id, cfg, clip_dir))
         .await.map_err(err)?.map_err(err)?;
     *state.session.lock() = Some(handle);
-    Ok(())
+    Ok(meeting_id)
 }
 
 #[tauri::command]
 pub fn stop_session(state: State<AppState>) -> CmdResult<()> {
-    if let Some(s) = state.session.lock().take() { s.stop(); }
+    if let Some(s) = state.session.lock().take() { finish(&state, s); }
     Ok(())
+}
+
+/// Stop + close the meeting row + fold session voices into voiceprints (only if enabled, and
+/// only for speakers the user assigned to a named participant).
+fn finish(state: &State<AppState>, s: pipeline::SessionHandle) {
+    s.stop();
+    let _ = state.db.end_meeting(s.meeting_id, chrono::Utc::now().timestamp());
+    if state.db.remember_voices() {
+        let assigned: std::collections::HashMap<u32, i64> = state.db.list_meetings(i64::MAX).ok()
+            .and_then(|ms| ms.into_iter().find(|m| m.id == s.meeting_id))
+            .map(|m| m.participants.into_iter().filter_map(|p| p.speaker_id.map(|sid| (sid, p.id))).collect())
+            .unwrap_or_default();
+        for (sid, known_pid, centroid, n) in s.speakers.lock().centroids() {
+            if sid == 0 || n == 0 { continue; } // never store your own mic; nothing to store
+            if let Some(pid) = assigned.get(&sid).copied().or(known_pid) {
+                let _ = state.db.update_voiceprint(pid, &centroid, n);
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -124,3 +149,63 @@ pub async fn play_clip(state: State<'_, AppState>, path: String) -> CmdResult<()
     player.play(&pcm, 16_000);
     Ok(())
 }
+
+// ---- calendar & history ---------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn calendar_events_near_now() -> CmdResult<Vec<CalendarEvent>> {
+    // EventKit may block on the permission prompt; keep it off the UI thread.
+    tauri::async_runtime::spawn_blocking(|| crate::calendar::events_near(chrono::Utc::now().timestamp()))
+        .await.map_err(err)?.map_err(err)
+}
+
+/// Attach (or re-attach) a calendar event to the running or a past meeting.
+#[tauri::command]
+pub fn link_meeting(state: State<AppState>, meeting_id: i64, event: CalendarEvent) -> CmdResult<MeetingSummary> {
+    let att: Vec<(String, Option<String>)> = event.attendees.iter().map(|a| (a.name.clone(), Some(a.email.clone()).filter(|s| !s.is_empty()))).collect();
+    state.db.link_event(meeting_id, &event.id, &event.title, &att).map_err(err)?;
+    summary(&state, meeting_id)
+}
+
+/// "Speaker 2 is Anna". Renames live labels too.
+#[tauri::command]
+pub fn assign_speaker(state: State<AppState>, meeting_id: i64, speaker_id: u32, name: String, email: Option<String>) -> CmdResult<MeetingSummary> {
+    state.db.assign_speaker(meeting_id, speaker_id, &name, email.as_deref()).map_err(err)?;
+    if let Some(s) = state.session.lock().as_ref() { if s.meeting_id == meeting_id { s.speakers.lock().rename(speaker_id, name); } }
+    summary(&state, meeting_id)
+}
+
+fn summary(state: &State<AppState>, meeting_id: i64) -> CmdResult<MeetingSummary> {
+    state.db.list_meetings(i64::MAX).map_err(err)?.into_iter().find(|m| m.id == meeting_id).ok_or_else(|| "meeting not found".into())
+}
+
+#[tauri::command]
+pub fn list_meetings(state: State<AppState>, limit: Option<i64>) -> CmdResult<Vec<MeetingSummary>> {
+    state.db.list_meetings(limit.unwrap_or(200)).map_err(err)
+}
+
+#[tauri::command]
+pub fn get_meeting(state: State<AppState>, id: i64) -> CmdResult<Option<(MeetingSummary, Vec<Segment>)>> {
+    state.db.meeting(id).map_err(err)
+}
+
+#[tauri::command]
+pub fn search_history(state: State<AppState>, query: String, limit: Option<i64>) -> CmdResult<Vec<SearchHit>> {
+    if query.trim().is_empty() { return Ok(vec![]); }
+    state.db.search(&query, limit.unwrap_or(50)).map_err(err)
+}
+
+#[tauri::command]
+pub fn delete_meeting(state: State<AppState>, id: i64) -> CmdResult<()> {
+    for clip in state.db.delete_meeting(id).map_err(err)? { let _ = std::fs::remove_file(clip); }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_remember_voices(state: State<AppState>) -> bool { state.db.remember_voices() }
+
+#[tauri::command]
+pub fn set_remember_voices(state: State<AppState>, on: bool) -> CmdResult<()> { state.db.set_remember_voices(on).map_err(err) }
+
+#[tauri::command]
+pub fn forget_voice(state: State<AppState>, participant_id: i64) -> CmdResult<()> { state.db.forget_voice(participant_id).map_err(err) }
