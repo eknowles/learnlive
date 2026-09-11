@@ -1,6 +1,6 @@
 [package]
 name = "learnlive"
-version = "0.2.1"
+version = "0.2.2"
 description = "Live translation, speaker detection and grammar coaching for video calls"
 authors = ["Ed Knowles"]
 edition = "2021"
