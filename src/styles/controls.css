@@ -273,3 +273,34 @@ html[data-inactive] .btn.toolbar-item.stop {
     0 0 0 0.5px rgba(0, 0, 0, 0.1),
     0 1px 2px rgba(0, 0, 0, 0.12);
 }
+
+/* font family + size, side by side in a Settings row */
+.type-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+/* beats `.row.stack select { width: 100% }`, which would push the slider off the row */
+.row.stack .type-row select {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 92px;
+}
+.type-row input[type='range'] {
+  flex: 1 1 auto;
+  min-width: 90px;
+}
+.type-row output {
+  font-size: 12px;
+  color: var(--label-2);
+  width: 38px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.reset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
