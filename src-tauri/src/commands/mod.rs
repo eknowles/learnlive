@@ -6,6 +6,7 @@ pub mod calendar;
 pub mod history;
 pub mod models;
 pub mod session;
+pub mod study;
 pub mod voice;
 
 /// Everything `tauri::generate_handler!` needs, in one place so lib.rs stays short.
@@ -21,6 +22,7 @@ macro_rules! all_commands {
             $crate::commands::session::rename_speaker,
             $crate::commands::models::model_status,
             $crate::commands::models::prepare_models,
+            $crate::commands::study::translate_word,
             $crate::commands::voice::speak,
             $crate::commands::voice::play_clip,
             $crate::commands::calendar::calendar_events_near_now,

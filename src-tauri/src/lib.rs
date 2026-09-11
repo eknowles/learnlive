@@ -28,6 +28,9 @@ pub struct AppState {
     pub engines: Arc<engine::Engines>,
     pub model_dir: std::path::PathBuf,
     pub db: Arc<db::Db>,
+    /// Cached word lookups for the reading surface's hover popover, keyed by
+    /// "from|to|lowercased word". Bounded by how many distinct words get hovered.
+    pub glossary: Mutex<std::collections::HashMap<String, String>>,
 }
 
 pub fn run() {
@@ -62,6 +65,7 @@ pub fn run() {
                 engines: Arc::new(engine::Engines::new(model_dir.clone())),
                 model_dir,
                 db,
+                glossary: Mutex::new(Default::default()),
             });
             Ok(())
         })
