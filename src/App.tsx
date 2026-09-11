@@ -16,6 +16,7 @@ import Button from './components/ui/Button'
 import { useHistory } from './hooks/useHistory'
 import { useLayout } from './hooks/useLayout'
 import { useMenu } from './hooks/useMenu'
+import { useReading } from './hooks/useReading'
 import { useSession } from './hooks/useSession'
 import { useTranscript } from './hooks/useTranscript'
 import { useWindowFocus } from './hooks/useWindowFocus'
@@ -27,6 +28,7 @@ const day = (s: number) => new Date(s * 1000).toLocaleDateString([], { weekday: 
 export default function App() {
   useWindowFocus()
   const layout = useLayout()
+  const reading = useReading()
   const transcript = useTranscript()
   const history = useHistory()
   const [selection, setSelection] = useState<Selection>({ kind: 'live' })
@@ -56,6 +58,7 @@ export default function App() {
     'go-live': () => select({ kind: 'live' }),
     'toggle-sidebar': layout.toggleSidebar,
     'toggle-inspector': layout.toggleInspector,
+    'cycle-langs': reading.cycle,
   })
 
   // Window title for Mission Control / the Window menu; the title bar itself is hidden.
@@ -132,6 +135,8 @@ export default function App() {
           searchRef={searchRef}
           inspectorOpen={layout.inspector}
           onToggleInspector={layout.toggleInspector}
+          mode={searching ? undefined : reading.reading.mode}
+          onMode={m => reading.update({ mode: m })}
         >
           {open && !searching && (
             <Button
@@ -150,7 +155,7 @@ export default function App() {
               {searching ? (
                 <SearchResults hits={history.hits} query={history.query} onOpen={id => select({ kind: 'meeting', id })} />
               ) : open ? (
-                <MeetingView meeting={open.meeting} segments={open.segments} />
+                <MeetingView meeting={open.meeting} segments={open.segments} mode={reading.reading.mode} />
               ) : (
                 <LiveView
                   phase={s.phase}
@@ -160,6 +165,7 @@ export default function App() {
                   models={s.models}
                   progress={s.progress}
                   canStart={canStart}
+                  mode={reading.reading.mode}
                 />
               )}
             </main>

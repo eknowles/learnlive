@@ -1,4 +1,5 @@
 import type { Phase } from '../../hooks/useSession'
+import type { LangMode } from '../../lib/reading'
 import type { ModelProgress, ModelStatus, Segment } from '../../lib/types'
 import Icon from '../ui/Icon'
 import Transcript from '../Transcript'
@@ -11,13 +12,15 @@ interface Props {
   models: ModelStatus[]
   progress: Record<string, ModelProgress>
   canStart: boolean
+  mode: LangMode
 }
 
 const mb = (n: number) => (n / 1_048_576).toFixed(0)
 
 /** The live surface: an empty state until the first sentence, then the transcript. */
-export default function LiveView({ phase, segments, learning, speechActive, models, progress, canStart }: Props) {
-  if (segments.length > 0) return <Transcript segments={segments} learning={learning} live={phase === 'live'} speechActive={speechActive} />
+export default function LiveView({ phase, segments, learning, speechActive, models, progress, canStart, mode }: Props) {
+  if (segments.length > 0)
+    return <Transcript segments={segments} learning={learning} mode={mode} live={phase === 'live'} speechActive={speechActive} />
 
   const missing = models.filter(m => !m.present)
   const missingMb = missing.reduce((a, m) => a + m.approx_mb, 0)

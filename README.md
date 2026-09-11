@@ -14,7 +14,7 @@ Join a Google Meet / Zoom / Teams call, press **Start listening**, and every utt
 
 Works in either direction: speech in your learning language is translated *to* your native language so you can follow; anything else (including what you say) is translated *into* the learning language so you see how you could have said it. If Whisper misidentifies the speaker's language, override it per source from the session setup panel.
 
-¹ POS underlining and hover grammar cards need a tagger model that currently has no working source (see [Known debt #1](ARCHITECTURE.md#known-debt-in-order-of-pain)) — plain text and no cards until one is hosted.
+¹ Hovering any word gives its translation, which needs no tagger. The *grammar* half of that card — part of speech, lemma, case and tense, and the colour-coded underlining — needs a tagger model that currently has no working source (see [Known debt #1](ARCHITECTURE.md#known-debt-in-order-of-pain)), so those stay hidden until one is hosted.
 
 A native-feeling Mac app: split-view sidebar (live + past meetings), unified toolbar, an inspector for per-session settings, and a Settings window (⌘,) for the rest — all in system colours, following light/dark/Increase Contrast.
 

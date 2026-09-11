@@ -20,6 +20,7 @@ pub mod id {
     pub const GO_LIVE: &str = "go-live";
     pub const TOGGLE_SIDEBAR: &str = "toggle-sidebar";
     pub const TOGGLE_INSPECTOR: &str = "toggle-inspector";
+    pub const CYCLE_LANGS: &str = "cycle-langs";
     pub const FLOAT: &str = "float";
     pub const HELP: &str = "help";
 }
@@ -94,6 +95,8 @@ pub fn build_menu(app: &AppHandle) -> tauri::Result<MenuHandles> {
         true,
         &[
             &MenuItem::with_id(app, id::GO_LIVE, "Go to Live", true, Some("Cmd+1"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, id::CYCLE_LANGS, "Switch Languages Shown", true, Some("Cmd+L"))?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, id::TOGGLE_SIDEBAR, "Toggle Sidebar", true, Some("Ctrl+Cmd+S"))?,
             &MenuItem::with_id(app, id::TOGGLE_INSPECTOR, "Toggle Inspector", true, Some("Alt+Cmd+I"))?,

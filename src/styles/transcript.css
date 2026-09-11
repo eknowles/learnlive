@@ -1,6 +1,12 @@
-/* The reading surface — the memorable part: big serif study line, quiet gloss beneath. */
+/* The reading surface — the memorable part.
+   One block per speaker turn, tinted in that speaker's colour; inside it, each sentence puts
+   the language being learnt beside its translation so the eye can pair them on one row. */
 .transcript {
   max-width: 68ch;
+}
+/* Two columns need roughly twice the measure, or each side wraps every few words. */
+.transcript[data-mode='both'] {
+  max-width: 112ch;
 }
 .meeting-head {
   max-width: 68ch;
@@ -17,22 +23,21 @@
   margin-top: 3px;
 }
 
-.seg {
-  display: grid;
-  grid-template-columns: 92px 1fr;
-  column-gap: 18px;
-  padding: 16px 0;
-  border-top: 1px solid var(--separator);
+/* a speaker's turn: the tint is what separates voices, so there are no rules between them */
+.turn {
+  padding: 9px 14px 11px;
+  margin-bottom: 7px;
+  border-radius: var(--radius-card);
+  /* A saturated hue at the same percentage reads far lighter than a neutral one, so the fill
+     alone cannot carry this; the hairline is what makes every speaker's block equally legible. */
+  background: color-mix(in srgb, var(--spk) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--spk) 14%, transparent);
 }
-.seg:first-child {
-  border-top: none;
-}
-.seg header {
+.turn header {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding-top: 7px;
-  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 5px;
 }
 .who {
   color: var(--spk);
@@ -42,85 +47,123 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.seg time,
+.turn time,
 .ago,
-.unsure,
-.draft-tag {
-  color: var(--label-2);
+.unsure {
+  color: var(--label-3);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
-.draft-tag {
-  font-style: italic;
+
+.lines {
+  display: grid;
+  gap: 7px;
 }
+.line {
+  position: relative;
+  display: grid;
+  gap: 3px 28px;
+}
+/* the pairing: study left, translation right, same row, same baseline grid */
+.transcript[data-mode='both'] .line {
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+}
+
 .study {
-  grid-column: 2;
-  font-family: var(--font-reading);
-  font-size: 21px;
-  line-height: 1.5;
+  font-family: var(--study-font, var(--font-reading));
+  font-size: var(--study-size, 21px);
+  line-height: 1.45;
   letter-spacing: -0.005em;
   user-select: text;
   -webkit-user-select: text;
   cursor: text;
 }
 .gloss {
-  grid-column: 2;
-  margin-top: 5px;
-  color: var(--label-2);
-  font-size: 14px;
+  font-family: var(--gloss-font, var(--font-ui));
+  font-size: var(--gloss-size, 14px);
   line-height: 1.5;
+  color: var(--label-2);
   user-select: text;
   -webkit-user-select: text;
   cursor: text;
 }
-.seg footer {
-  grid-column: 2;
+/* stacked (single-language modes keep one column, so the translation sits under the study) */
+.transcript:not([data-mode='both']) .gloss {
+  margin-top: 2px;
+}
+/* Floated rather than laid out. In flow it reserved 20px under every sentence whether or not
+   anyone wanted it, and revealing it on hover would reflow the page continuously — hovering
+   words is the whole point of this surface, so the actions must not move the text. */
+.line footer {
+  position: absolute;
+  right: 0;
+  bottom: -5px;
+  z-index: 2;
   display: flex;
   gap: 2px;
-  margin-top: 8px;
-  margin-left: -5px;
+  padding: 1px 4px;
+  border-radius: 8px;
+  background: var(--bg-control);
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    0 2px 6px rgba(0, 0, 0, 0.1);
   opacity: 0;
+  pointer-events: none;
   transition: opacity 120ms;
 }
-.seg:hover footer,
-.seg:focus-within footer {
+.line:hover footer,
+.line:focus-within footer {
   opacity: 1;
+  pointer-events: auto;
 }
-.seg footer .btn.plain {
+.line footer .btn.plain {
   font-size: 12px;
   height: 20px;
 }
-.seg.draft .study {
+.line.draft .study {
   color: var(--label-2);
 }
-.seg.draft .gloss {
+.line.draft .gloss {
   font-style: italic;
 }
 
-/* words: colour lives in the underline, so the sentence still reads as a sentence */
+/* words: a quiet dotted underline says "hoverable" without turning prose into a worksheet.
+   --pos is set only when a POS tagger is installed; without one the words stay neutral. */
 .w {
   position: relative;
-  cursor: text;
+  cursor: default;
+  border-radius: 4px;
+  padding: 0 1px;
   text-decoration: underline;
-  text-decoration-color: var(--pos);
-  text-decoration-thickness: 2px;
+  text-decoration-style: dotted;
+  text-decoration-color: color-mix(in srgb, var(--pos, var(--label)) 20%, transparent);
+  text-decoration-thickness: 1px;
   text-underline-offset: 4px;
-  margin-right: 0.32em;
-  border-radius: 3px;
 }
-.w:hover {
-  background: color-mix(in srgb, var(--pos) 14%, transparent);
+.w:hover,
+.w.lit {
+  background: color-mix(in srgb, var(--pos, var(--accent)) 13%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--pos, var(--accent)) 70%, transparent);
 }
-.punct {
-  margin-left: -0.32em;
-  margin-right: 0.32em;
+.w:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* only the tagger path needs manufactured spacing — see `Words` in Transcript.tsx */
+.tokens .w {
+  margin-right: 0.3em;
+}
+.tokens .punct {
+  margin-left: -0.3em;
+  margin-right: 0.3em;
 }
 .w.changed {
   animation: settle 1.6s ease-out;
 }
 @keyframes settle {
   0% {
-    background: color-mix(in srgb, var(--pos) 45%, transparent);
+    background: color-mix(in srgb, var(--pos, var(--accent)) 40%, transparent);
   }
   100% {
     background: transparent;
@@ -128,53 +171,73 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .w.changed {
-    background: color-mix(in srgb, var(--pos) 25%, transparent);
+    background: color-mix(in srgb, var(--pos, var(--accent)) 22%, transparent);
   }
 }
 
-/* the hover card is a popover: material background, hairline, soft shadow */
+/* the hover card: the translation is the headline, grammar is a footnote under it */
 .card {
   position: absolute;
   left: 0;
-  top: calc(100% + 8px);
+  top: calc(100% + 7px);
   z-index: 5;
-  min-width: 180px;
+  min-width: 168px;
+  max-width: 280px;
   background: var(--bg-control);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 9px 11px;
   font-family: var(--font-ui);
   font-size: 13px;
   line-height: 1.4;
   box-shadow: var(--shadow-popover);
   display: grid;
-  gap: 4px;
+  gap: 3px;
   user-select: none;
   -webkit-user-select: none;
   cursor: default;
+  text-decoration: none;
+}
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.card-word {
+  font-family: var(--font-reading);
+  font-size: 15px;
+  color: var(--label-2);
+}
+.card-gloss {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.card-gloss.pending {
+  color: var(--label-3);
+  font-weight: 400;
+  font-style: italic;
 }
 .card-lemma {
-  font-family: var(--font-reading);
-  font-size: 17px;
+  color: var(--label-2);
 }
 .card-pos {
   font-weight: 600;
+  font-size: 12px;
 }
 .card-feats {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: 3px 10px;
   color: var(--label-2);
-}
-.card .btn {
-  justify-self: start;
-  margin-top: 4px;
+  font-size: 12px;
 }
 
 .pause {
   text-align: center;
   color: var(--label-3);
   font-size: 11px;
-  padding: 10px 0 2px;
+  padding: 8px 0 6px;
 }
 .pause::before,
 .pause::after {
