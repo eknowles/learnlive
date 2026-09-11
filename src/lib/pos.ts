@@ -44,13 +44,20 @@ export const FEATS: Record<string, Record<string, string>> = {
   Person: { '1': '1st person', '2': '2nd person', '3': '3rd person' },
 }
 
+/** Speaker colours, in the order they are handed out.
+ *
+ *  Only keywords WebKit actually implements may appear here. `-apple-system-teal`, `-indigo`,
+ *  `-mint` and `-cyan` are *not* among them: they parse, then resolve to the default label
+ *  colour, so a speaker assigned one silently comes out looking like plain text. Teal used to
+ *  be first in this list, which meant the first remote speaker of every call had no colour at
+ *  all. `src/__tests__/pos.test.ts` guards the list. */
 export const SPEAKER_COLORS = [
-  '-apple-system-teal',
+  '-apple-system-blue',
   '-apple-system-purple',
   '-apple-system-orange',
-  '-apple-system-blue',
-  '-apple-system-pink',
   '-apple-system-green',
+  '-apple-system-pink',
+  '-apple-system-brown',
 ]
 /** Speaker 0 is you: plain label colour, so the other voices carry the colour. */
 export const speakerColor = (id: number) => (id === 0 ? 'var(--label)' : SPEAKER_COLORS[(id - 1) % SPEAKER_COLORS.length])
