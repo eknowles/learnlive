@@ -19,7 +19,16 @@ jobs:
       - uses: jetify-com/devbox-install-action@v0.12.0
         with: { enable-cache: true }
       - uses: Swatinem/rust-cache@v2
-        with: { workspaces: src-tauri }
+        with:
+          workspaces: src-tauri
+          # ort and sherpa-rs-sys download their native libraries here and record the
+          # paths as -L flags in their build-script output. That output lives in target/
+          # and is cached; these directories were not, so on a cache hit the build script
+          # did not rerun, nothing re-downloaded, and linking failed against -L paths that
+          # no longer existed. They have to be cached together or not at all.
+          cache-directories: |
+            ~/Library/Caches/ort.pyke.io
+            ~/Library/Caches/sherpa-rs
       - run: devbox run -- npm ci
       - run: devbox run -- just test
 
@@ -33,7 +42,16 @@ jobs:
       - uses: jetify-com/devbox-install-action@v0.12.0
         with: { enable-cache: true }
       - uses: Swatinem/rust-cache@v2
-        with: { workspaces: src-tauri }
+        with:
+          workspaces: src-tauri
+          # ort and sherpa-rs-sys download their native libraries here and record the
+          # paths as -L flags in their build-script output. That output lives in target/
+          # and is cached; these directories were not, so on a cache hit the build script
+          # did not rerun, nothing re-downloaded, and linking failed against -L paths that
+          # no longer existed. They have to be cached together or not at all.
+          cache-directories: |
+            ~/Library/Caches/ort.pyke.io
+            ~/Library/Caches/sherpa-rs
       - uses: actions/cache@v4
         with:
           path: ${{ env.LEARNLIVE_MODELS }}
@@ -55,6 +73,15 @@ jobs:
       - uses: jetify-com/devbox-install-action@v0.12.0
         with: { enable-cache: true }
       - uses: Swatinem/rust-cache@v2
-        with: { workspaces: src-tauri }
+        with:
+          workspaces: src-tauri
+          # ort and sherpa-rs-sys download their native libraries here and record the
+          # paths as -L flags in their build-script output. That output lives in target/
+          # and is cached; these directories were not, so on a cache hit the build script
+          # did not rerun, nothing re-downloaded, and linking failed against -L paths that
+          # no longer existed. They have to be cached together or not at all.
+          cache-directories: |
+            ~/Library/Caches/ort.pyke.io
+            ~/Library/Caches/sherpa-rs
       - run: devbox run -- just setup
       - run: devbox run -- just build
