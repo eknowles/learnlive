@@ -63,6 +63,8 @@ ui-preview:
     scripts/ui-preview/render http://localhost:5173/ out/ui-live.png 1180 780 light scripts/ui-preview/live.js
     scripts/ui-preview/render http://localhost:5173/ out/ui-meeting-dark.png 1180 780 dark scripts/ui-preview/meeting.js
     scripts/ui-preview/render http://localhost:5173/ out/ui-search.png 1180 780 light scripts/ui-preview/search.js
+    scripts/ui-preview/render http://localhost:5173/ out/ui-hover.png 1280 700 light scripts/ui-preview/hover.js
+    scripts/ui-preview/render http://localhost:5173/ out/ui-study-only.png 1180 640 dark scripts/ui-preview/study-only.js
     scripts/ui-preview/render "http://localhost:5173/index.html#settings" out/ui-settings.png 560 500 light
 
 # ---- test -----------------------------------------------------------------------------------

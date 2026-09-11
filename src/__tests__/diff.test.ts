@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { changedIndices } from '../lib/diff'
-import type { Token } from '../lib/types'
 
-const tok = (text: string): Token => ({ text, lemma: text, pos: 'NOUN', feats: {}, aligned_to: null })
-const t = (s: string) => s.split(' ').map(tok)
+const t = (s: string) => s.split(' ')
 
 describe('changedIndices', () => {
   it('flags nothing on first draft', () => {

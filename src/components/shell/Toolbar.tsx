@@ -1,5 +1,6 @@
 import type { ReactNode, RefObject } from 'react'
 import type { Phase } from '../../hooks/useSession'
+import { MODES, type LangMode } from '../../lib/reading'
 import Button from '../ui/Button'
 import SearchField from '../ui/SearchField'
 
@@ -17,6 +18,9 @@ interface Props {
   searchRef: RefObject<HTMLInputElement>
   inspectorOpen: boolean
   onToggleInspector: () => void
+  /** Absent on surfaces with no transcript to switch (search results). */
+  mode?: LangMode
+  onMode?: (m: LangMode) => void
   children?: ReactNode
 }
 
@@ -33,6 +37,22 @@ export default function Toolbar(p: Props) {
         {p.subtitle && <span data-tauri-drag-region>{p.subtitle}</span>}
       </div>
       <div className="tb-group">
+        {p.mode && p.onMode && (
+          <div className="segmented" role="group" aria-label="Languages shown" title="Switch Languages Shown (Cmd+L)">
+            {MODES.map(m => (
+              <button
+                key={m.id}
+                type="button"
+                data-on={p.mode === m.id}
+                title={m.title}
+                aria-pressed={p.mode === m.id}
+                onClick={() => p.onMode?.(m.id)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        )}
         {p.children}
         {/* Keyed so Start→Stop remounts: WebKit will not transition between two system-colour keywords. */}
         {p.phase === 'live' ? (
