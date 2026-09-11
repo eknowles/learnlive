@@ -56,11 +56,7 @@
     ],
     "macOS": {
       "minimumSystemVersion": "13.0",
-      "entitlements": "entitlements.plist",
-      "frameworks": [
-        "target/release/libonnxruntime.1.17.1.dylib",
-        "target/release/libsherpa-onnx-c-api.dylib"
-      ]
+      "entitlements": "entitlements.plist"
     }
   }
 }
