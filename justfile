@@ -44,7 +44,16 @@ build:
     set -euo pipefail
     unset DEVELOPER_DIR SDKROOT
     export PATH="/usr/bin:/bin:$PATH"
-    npx tauri build
+    # Two passes, because `bundle.macOS.frameworks` cannot live in the default config.
+    # tauri-build validates those paths on *every* cargo invocation, including `cargo test`,
+    # and the dylibs do not exist yet: sherpa-rs-sys emits them, declares no `links` key, and
+    # so is not ordered before this crate's build script. The first pass is what produces them;
+    # only then is it safe to name them, which the overlay does.
+    npm run build
+    cargo build --release --manifest-path {{manifest}}
+    # Absolute: the CLI does not document whether a relative --config is resolved against
+    # the cwd or the tauri directory, and it differs from how other path options behave.
+    npx tauri build --config "{{justfile_directory()}}/src-tauri/tauri.bundle.conf.json"
 
 # Render the UI states to out/ui-*.png in a bare WKWebView with the Tauri bridge mocked (needs `npx vite`)
 ui-preview:
