@@ -43,6 +43,15 @@ export interface Token {
   aligned_to: [number, number] | null
 }
 
+/** One word, glossed for the hover popover. */
+export interface WordGloss {
+  word: string
+  translation: string
+  /** Counterpart's byte range in the other language's sentence. Always null until an aligner
+   *  exists; the popover falls back to translating the word on its own. */
+  aligned_to: [number, number] | null
+}
+
 export interface SpeakerRef {
   id: number
   label: string

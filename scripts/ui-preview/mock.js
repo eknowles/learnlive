@@ -26,6 +26,15 @@
     meeting(2, 'Session Tue 26 Aug 19:02', now - 15 * d, 41, 187),
   ]
   const hits = segments.slice(0, 3).map(s => ({ meeting_id: 7, meeting_title: 'Russian lesson with Anna', started_at: now - 2 * h, segment: s }))
+  // Enough of a dictionary for the hover popover to look like itself in a preview.
+  const GLOSS = {
+    'вчера': 'yesterday', 'я': 'I', 'читала': 'was reading', 'интересную': 'interesting',
+    'книгу': 'book', 'о': 'about', 'путешествиях': 'travels', 'она': 'it', 'называется': 'is called',
+    'тихий': 'quiet', 'дон': 'Don', 'но': 'but', 'это': 'this', 'скорее': 'rather', 'роман': 'novel',
+    'тоже': 'too', 'хотел': 'wanted', 'бы': 'would', 'её': 'it', 'прочитать': 'to read',
+    'мы': 'we', 'можем': 'can', 'обсудить': 'discuss', 'первую': 'first', 'главу': 'chapter',
+    'на': 'on', 'следующей': 'next', 'какая': 'which', 'была': 'was', 'книга': 'book',
+  }
   const listeners = {}
   const responses = {
     list_audio_devices: () => [
@@ -45,6 +54,7 @@
     search_history: () => hits,
     calendar_events_near_now: () => [{ id: 'ev7', title: 'Russian lesson with Anna', start: now - 600, end: now + 3000, attendees: [{ name: 'Anna Petrova', email: 'anna@example.com' }], url: null, calendar: 'Personal' }],
     get_remember_voices: () => true,
+    translate_word: a => ({ word: a.word, translation: GLOSS[a.word.toLowerCase()] ?? '(' + a.word + ')', aligned_to: null }),
     start_session: () => 7,
     'plugin:event|listen': (a, cbId) => { listeners[a.event] = cbId; return 1 },
   }

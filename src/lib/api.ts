@@ -12,6 +12,7 @@ import type {
   SearchHit,
   Segment,
   SessionConfig,
+  WordGloss,
 } from './types'
 
 export const api = {
@@ -25,6 +26,10 @@ export const api = {
   renameSpeaker: (id: number, label: string) => invoke<void>('rename_speaker', { id, label }),
   speak: (text: string, lang: string, speed = 1) => invoke<void>('speak', { text, lang, speed }),
   playClip: (path: string) => invoke<void>('play_clip', { path }),
+  /** `sentence` is unused today — it is what a real aligner will need to place the word, and
+   *  passing it now means the popover will not change when one arrives. */
+  lookupWord: (word: string, sentence: string, from: string, to: string) =>
+    invoke<WordGloss>('translate_word', { word, sentence, from, to }),
 
   calendarNearNow: () => invoke<CalendarEvent[]>('calendar_events_near_now'),
   linkMeeting: (meetingId: number, event: CalendarEvent) => invoke<MeetingSummary>('link_meeting', { meetingId, event }),
